@@ -10,9 +10,9 @@ The main contents of this repository include:
 * An Isaacgym implementation of the [Centroidal QP Controller](https://arxiv.org/abs/2009.10019), which can be executed efficiently in parallel in GPU.
 
 ## To Do ##
-- :white_check_mark: Add BEV map to the repo
+- [x] Add BEV map to the repo
+- [] Go2 real robot deployment
 - [] 
-- [x] Go1 deployment code
 - [x] Go2 training configuration example (does not guarantee the same performance as the paper)
 - [x] Go2 deployment code example
 
