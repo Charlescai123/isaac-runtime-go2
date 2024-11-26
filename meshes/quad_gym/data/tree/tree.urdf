@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<robot name="pretty_christmas_tree">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <mesh filename="tree.obj" scale="1.0 1.0 1.0" />
+      </geometry>
+      <material name="tree_material">
+        <color rgba="0.0 1.0 0.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.4" length="0.1" />
+      </geometry>
+    </collision>
+    <inertia>
+      <origin rpy="0 0 0" xyz="0 0 1.0" />
+      <mass value="5.0" />
+      <inertia
+        ixx="0.4" ixy="0.0" ixz="0.0"
+        iyy="0.4" iyz="0.0"
+        izz="0.1" />
+    </inertia>
+  </link>
+</robot>

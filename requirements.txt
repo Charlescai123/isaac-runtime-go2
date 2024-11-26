@@ -1,0 +1,13 @@
+absl-py
+cvxpy
+dash
+filterpy
+ml_collections
+numpy==1.19.5
+pybullet
+qpth
+tensorboard
+torch
+torchaudio
+torchvision
+tqdm

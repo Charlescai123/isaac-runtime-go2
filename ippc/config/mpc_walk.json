@@ -1,0 +1,96 @@
+{
+    "SceneParams": {
+        "env_sensors_list": [
+            "EnvLastActionSensor"
+        ],
+        "friction_coefficient": [
+            1.0,
+            0.01,
+            0.01
+        ],
+        "terrain_type": "grass",
+        "terrain_randomizer": true,
+        "terrain_random_shape": false,
+        "moving": false,
+        "high_range": 0.1
+    },
+    "RobotParams": {
+        "robot_class": "A1",
+        "robot_sensors_list": [
+            "RobotMotorAngleSensor",
+            "RobotIMUSensor"
+        ],
+        "enable_vision_sensor": false,
+        "robot_cam_get_image": false,
+        "robot_mass_rescale": 1.0,
+        "motor_control_mode": "torque",
+        "controller_type": "mpc",
+        "controller_clip_num": null
+    },
+    "SimParams": {
+        "sim_record_video": false,
+        "sim_random_seed": 0,
+        "sim_time_step_s": 0.001,
+        "num_action_repeat": 2,
+        "enable_hard_reset": false,
+        "enable_rendering": true,
+        "enable_rendering_gui": true,
+        "robot_on_rack": false,
+        "camera_distance": 1.0,
+        "camera_pitch": -30,
+        "camera_yaw": -90,
+        "camera_width": 480,
+        "camera_height": 360,
+        "egl_rendering": false,
+        "reset_time": -1,
+        "enable_action_filter": false,
+        "enable_action_interpolation": true,
+        "allow_knee_contact": false,
+        "enable_clip_motor_commands": false,
+        "env_time_step": 0.033,
+        "num_bullet_solver_iterations": 33
+    },
+    "TaskParams": {
+        "task_type": "move_forward_task",
+        "task_params": {
+            "move_forward_coeff": [
+                1
+            ],
+            "time_step_s": [
+                0.001
+            ],
+            "num_action_repeat": [
+                33
+            ],
+            "height_fall_coeff": [
+                0.24
+            ],
+            "alive_reward": [
+                0.1
+            ],
+            "target_vel": [
+                1.0
+            ],
+            "check_contact": [
+                false
+            ],
+            "target_vel_dir": [
+                [
+                    1,
+                    0
+                ]
+            ],
+            "energy_weight": -0.005
+        },
+        "sub_goal": false,
+        "include_historic_sensors": false,
+        "num_history": 3,
+        "domain_randomization": false,
+        "diagonal_act": false,
+        "random_dir": false,
+        "dir_update_interval": null,
+        "curriculum": false,
+        "max_episode_steps": 1000,
+        "random_seed": 1
+    }
+}
