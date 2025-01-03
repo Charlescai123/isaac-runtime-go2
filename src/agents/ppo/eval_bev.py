@@ -1,7 +1,7 @@
 """Evaluate a trained policy."""
 
 """
-python -m src.agents.ppo.eval --logdir=logs/train/ --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False --save_traj=True
+python -m src.agents.ppo.eval --logdir=logs/train/pronk_cajun --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False --save_traj=True
 """
 
 from absl import app
@@ -142,16 +142,16 @@ def main(argv):
             print(f"action is: {action}")
             # action = torch.zeros(6).unsqueeze(dim=0)
             state, _, reward, done, info = env.step(action)
-            pcd_points = np.load("new_pcld.npy")
+            # pcd_points = np.load("new_pcld.npy")
             # pcd_points = pcd_points[:, [2, 0, 1]]
             # pcd_points[:, 0] += 10
             # pcd_points[:, 1] -= 30
             # pcd_points[:, 2] += 2
-            bev_img = birds_eye_point_cloud(pcd_points)
-            plt.imshow(bev_img)
-            plt.show()
-            print("loaded!!!!")
-            time.sleep(123)
+            # bev_img = birds_eye_point_cloud(pcd_points)
+            # plt.imshow(bev_img)
+            # plt.show()
+            # print("loaded!!!!")
+            # time.sleep(123)
             # Add BEV
             # add_bev_map(env=env, idx=steps_count)
             print(f"steps_count: {steps_count}")

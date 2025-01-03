@@ -62,7 +62,7 @@ class Robot:
         self._actors = []
         self._time_since_reset = torch.zeros(self._num_envs, device=self._device)
 
-        self.record_video = False  # Record a video or not
+        self.record_video = True  # Record a video or not
 
         if "cuda" in self._device:
             torch._C._jit_set_profiling_mode(False)
@@ -184,7 +184,7 @@ class Robot:
                                                   asset_config.self_collisions, 0)
 
             # Add outdoor scene
-            # self.load_outdoor_asset(env=env_handle, gym=self._gym, sim=self._sim, i=i, reverse=False)
+            self.load_outdoor_asset(env=env_handle, gym=self._gym, sim=self._sim, i=i, reverse=False)
 
             # Add uneven terrains
             self.add_uneven_terrains(gym=self._gym, sim=self._sim, reverse=False)
@@ -392,7 +392,7 @@ class Robot:
         # don't use convex decomposition
         # asset_options.vhacd_enabled = False
         # asset2 = gym.load_asset(sim, asset_root, "assets/arrow.urdf", asset_options)
-        asset2 = gym.load_asset(sim, f"{asset_root}/data", "terrain.urdf", asset_options)
+        # asset2 = gym.load_asset(sim, f"{asset_root}/data", "terrain.urdf", asset_options)
 
         if reverse:
             offset_x = -28 + self._scene_offset_x
@@ -796,7 +796,10 @@ class Robot:
             self._gym.poll_viewer_events(self._viewer)
 
             # Get point cloud data
+            s = time.time()
             # self.get_pcd()
+            e = time.time()
+            print(f"get pcd time: {e - s}")
 
             # Record a video or not
             if self.record_video:
@@ -865,12 +868,54 @@ class Robot:
                 import cv2
 
                 rgb_img = cv2.cvtColor(rgb_image, cv2.COLOR_RGBA2BGR)
-                cv2.imshow('RGB Image', rgb_img)
+
+                # cv2.imshow('RGB Image', rgb_img)
 
                 # _depth_img[np.isinf(_depth_img)] = -256
+                def replace_inf_with_second_smallest(depth_image):
+                    """
+                    Replace all `inf` values in a depth image with the second smallest finite value.
+
+                    Args:
+                        depth_image (np.ndarray): Input depth image (2D array).
+
+                    Returns:
+                        np.ndarray: Depth image with `inf` values replaced.
+                    """
+                    print(f"depth_image: {depth_image}")
+
+                    # Flatten the array and filter finite values
+                    finite_values = depth_image[np.isfinite(depth_image)]
+
+                    if len(finite_values) < 2:
+                        raise ValueError(
+                            "The depth image does not have enough finite values to determine the second smallest.")
+
+                    # Find the unique sorted finite values
+                    unique_values = np.unique(finite_values)
+
+                    if len(unique_values) < 2:
+                        raise ValueError(
+                            "The depth image does not have enough unique finite values for a valid replacement.")
+
+                    # The second smallest value
+                    second_smallest = unique_values[1]
+
+                    # Replace `inf` values with the second smallest value
+                    result = np.copy(depth_image)
+                    result[np.isinf(result)] = second_smallest
+
+                    return result
+
+                _depth_img = replace_inf_with_second_smallest(_depth_img)
+
                 depth_normalized = cv2.normalize(_depth_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
+                # depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
+                depth_colored = depth_normalized
                 cv2.imshow('Depth Image', depth_colored)
+
+                # combined_image = np.hstack((rgb_image, depth_colored))
+                # cv2.imshow('Image', combined_image)
                 cv2.waitKey(1)
                 print(f"_depth_img: {_depth_img}")
                 print(f"_depth_img: {_depth_img.shape}")
@@ -883,8 +928,8 @@ class Robot:
                 if is_all_zero:
                     np.savetxt('depth_error.txt', _depth_img)
                     # np.savetxt('raw_depth_tensor.txt', depth_image_)
-                    torch.save(torch_camera_depth_tensor, 'raw_depth_tensor_error.pt')
-                    time.sleep(123)
+                    # torch.save(torch_camera_depth_tensor, 'raw_depth_tensor_error.pt')
+                    # time.sleep(123)
                 else:
                     # np.savetxt('depth.txt', _depth_img)
                     # torch.save(torch_camera_depth_tensor, 'raw_depth_tensor.pt')
@@ -1062,7 +1107,7 @@ class Robot:
 
         local_transform = gymapi.Transform()
         local_transform.p = gymapi.Vec3(*camera_pos)
-        local_transform.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.radians(45.0))
+        local_transform.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.radians(30.0))
         self._gym.attach_camera_to_body(camera_handle, self._envs[0], self._actors[0], local_transform,
                                         gymapi.FOLLOW_TRANSFORM)
 
@@ -1327,15 +1372,15 @@ class Robot:
         # # Sets a similar view to the gym viewer in the PPTK viewer
         # v.set(lookat=[0, 0, 0], r=5, theta=0.4, phi=0.707)
         # print("Point Cloud Complete")
-        print(f"point: {points}")
+        # print(f"point: {points}")
         # print(f"point: {points.shape}")
         import open3d as o3d
 
         # Convert points and color to numpy arrays
         points = np.array(points)
         np.save("new_pcld", points)
-        print(f"points: {points}")
-        print(f"points: {points.shape}")
+        # print(f"points: {points}")
+        # print(f"points: {points.shape}")
         # colors = np.array([color_map[c] for c in color])
         # colors = rgba_buffer[]
         rgba_image = np.frombuffer(rgba_buffer, dtype=np.uint8).reshape(1080, 1920, 4)
@@ -1361,9 +1406,9 @@ class Robot:
         # print("Point Cloud Visualization Complete")
         from src.utils.bev_utils import birds_eye_point_cloud
         import matplotlib.pyplot as plt
-        pcd_points = np.load("pcld_right.npy")
-        bev_img = birds_eye_point_cloud(pcd_points)
-        print("loaded!!!!")
+        # pcd_points = np.load("pcld_right.npy")
+        # bev_img = birds_eye_point_cloud(pcd_points)
+        # print("loaded!!!!")
         # time.sleep(123)
         # if show_plot:
         #     axarr[0, 0].imshow(rgb)
@@ -1372,6 +1417,6 @@ class Robot:
         #     axarr[1, 1].imshow(bev_img)
         #     plt.pause(0.1)
 
-        label_save_folder = '.'
-        bev_save_path = os.path.join(label_save_folder, f"bev_.png")
-        plt.imsave(bev_save_path, bev_img)
+        # label_save_folder = '.'
+        # bev_save_path = os.path.join(label_save_folder, f"bev_.png")
+        # plt.imsave(bev_save_path, bev_img)

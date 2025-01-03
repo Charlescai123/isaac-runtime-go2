@@ -1,4 +1,4 @@
-"""Policy outputs desired CoM speed for Go1 to track the desired speed."""
+"""Policy outputs desired CoM speed for Go2 to track the desired speed."""
 from absl import logging
 
 import itertools
@@ -299,7 +299,7 @@ class JumpEnv:
         self._gym.add_ground(self._sim, plane_params)
         self._terrain = None
 
-        from ippc.quad_gym.env_builder import build_a1_ground_env
+        # from ippc.quad_gym.env_builder import build_a1_ground_env
         # build_a1_ground_env()
 
     def _compute_init_positions(self):
