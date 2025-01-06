@@ -1,261 +1,115 @@
 import sys
 import copy
-import enum
 import time
-import ctypes
-import pickle
 import traceback
 
-import asyncio
 import numpy as np
 import cvxpy as cp
-# import cvxpy as cp
-from typing import Tuple, Any
-import multiprocessing as mp
 
-# import matlab
-# import matlab.engine
 from omegaconf import DictConfig
-from numpy import linalg as LA
-import matplotlib.pyplot as plt
-from collections import deque
 from numpy.linalg import pinv
 
 from src.physical_design import MATRIX_P
-from scipy.linalg import solve_continuous_are, inv
-from src.utils.utils import energy_value
-from cvxopt import matrix, solvers
-from isaacgym.torch_utils import to_torch
-
+from src.utils.utils import energy_value, energy_value_2d
 
 np.set_printoptions(suppress=True)
 
 
 class HATeacher:
-    def __init__(self, teacher_cfg: DictConfig):
+    """Monitors the safety-critical systems in all envs"""
+
+    def __init__(self, num_envs, teacher_cfg: DictConfig):
+        self._num_envs = num_envs
 
         # Teacher Configure
-        self.chi = teacher_cfg.chi
-        self.epsilon = teacher_cfg.epsilon
+        self.chi = np.array([teacher_cfg.chi] * self._num_envs)
+        self.epsilon = np.array([teacher_cfg.epsilon] * self._num_envs)
+        self.max_dwell_steps = np.array([teacher_cfg.tau] * self._num_envs)
+        self.teacher_enable = np.array([teacher_cfg.teacher_enable] * self._num_envs)
+        self.teacher_learn = np.array([teacher_cfg.teacher_learn] * self._num_envs)
         self.cvxpy_solver = teacher_cfg.cvxpy_solver
         self.p_mat = MATRIX_P
-        self.max_dwell_steps = teacher_cfg.tau
-
-        self.teacher_enable = teacher_cfg.teacher_enable
-        self.teacher_learn = teacher_cfg.teacher_learn
 
         # HAC Runtime
-        # self._ref_state = None
-        self._plant_state = None
-        self._teacher_activate = False
-        # self._error_state = None
-        self._patch_center = np.zeros(12)
-        self._center_update = True  # Patch center update flag
-        self._dwell_step = 0  # Dwell step
-        self.patch_interval = 5
+        self._plant_state = np.array([None] * self._num_envs)
+        self._teacher_activate = np.array([False] * self._num_envs)
+        self._patch_center = np.zeros((self._num_envs, 12))
+        self._center_update = np.array([True] * self._num_envs)  # Patch center update flag
+        self._dwell_step = np.zeros(self._num_envs)  # Dwell step
+        # self.patch_interval = 5
+        self.patch_interval = np.array([5] * self._num_envs)
 
         # Patch kp and kd
         # self._patch_kp = np.diag((0., 0., 100., 100., 100., 0.))
         # self._patch_kd = np.diag((40., 30., 10., 10., 10., 30.))
         # self.apply_realtime_patch = False
-        self.apply_realtime_patch = True
+        self.apply_realtime_patch = np.array([True] * self._num_envs)
         #
         #
-        self._patch_kp = np.array([[-0., -0., -0., -0., -0., -0.],
-                                   [-0., -0., -0., -0., -0., -0.],
-                                   [-0., -0., 296., 0., - 0., 0.],
-                                   [-0., -0., - 0., 200., 0, 0],
-                                   [-0., -0., 0., 0, 200, 0],
-                                   [-0., -0., 0., 0, -0., 194]])
+        self._patch_kp = np.array([[[-0., -0., -0., -0., -0., -0.],
+                                    [-0., -0., -0., -0., -0., -0.],
+                                    [-0., -0., 296., 0., - 0., 0.],
+                                    [-0., -0., - 0., 200., 0, 0],
+                                    [-0., -0., 0., 0, 200, 0],
+                                    [-0., -0., 0., 0, -0., 194]]] * self._num_envs)
 
-        self._patch_kd = np.array([[31., 0., 0., -0., 0., 0.],
-                                   [0., 13., -0., 0., -0, 0.],
-                                   [0., -0., 28., 0., -0., 0.],
-                                   [0., 0., -0., 26, 0., 0.],
-                                   [-0., 0., 0., -0., 26., -0.],
-                                   [0., 0., 0., 0., -0., 25.]])
-        #
-        # self._patch_kp = np.array([[-0., -0., -0., -0., -0., -0.],
-        #                            [-0., -0., -0., -0., -0., -0.],
-        #                            [-0., -0., 253., -0., -0., 0.],
-        #                            [-0., -0., -0., 248., 0., 0.],
-        #                            [-0., -0., -0., 0., 248., 0.],
-        #                            [-0., -0., 0., 0., -0., 240.]])
-        # self._patch_kd = np.array([[16., -0., 0., 0., - 0., - 0.],
-        #                            [0., 16., 0., 0., 0., -0.],
-        #                            [-0., 0., 32., -0., -0., 0.],
-        #                            [-0., 0., 0., 31., 0., -0.],
-        #                            [0., -0., -0., 0., 31., -0.],
-        #                            [0., -0., 0., 0., 0., 31.]])
+        self._patch_kd = np.array([[[31., 0., 0., -0., 0., 0.],
+                                    [0., 13., -0., 0., -0, 0.],
+                                    [0., -0., 28., 0., -0., 0.],
+                                    [0., 0., -0., 26, 0., 0.],
+                                    [-0., 0., 0., -0., 26., -0.],
+                                    [0., 0., 0., 0., -0., 25.]]] * self._num_envs)
 
-        # self._patch_kp = np.array([[-0., -0., -0., -0., -0., -0.],
-        #                            [-0., -0., -0., -0., -0., -0.],
-        #                            [-0., -0., 1249., -0., 0., -0.],
-        #                            [-0., -0., 0., 1181., -0., 0.],
-        #                            [-0., -0., 0., 0., 1181., -0.],
-        #                            [-0., -0., -0., 0., -0., 1152.]]) * 0.2
-        # self._patch_kd = np.array([[35., -0., 0., 0., 0., 0.],
-        #                            [0., 35., 0., 0., -0., 0.],
-        #                            [-0., -0., 71., -0., 0., -0.],
-        #                            [-0., -0., -0., 69., -0., 0.],
-        #                            [-0., 0., 0., 0., 69., -0.],
-        #                            [-0., 0., 0., 0., 0., 68.]])
-
-        # self._patch_kp = np.array([[-0., -0., -0., -0., -0., -0.],
-        #                            [-0., -0., -0., -0., -0., -0.],
-        #                            [-0., -0., 118., -0., 0., -0.],
-        #                            [-0., -0., 0., 125., 3., 26.],
-        #                            [-0., -0., 0., -22., 125., -2.],
-        #                            [-0., -0., -0., 16., -14., 105.]])
-        # self._patch_kd = np.array([[11., -0., 0., 0., 0., 0.],
-        #                            [0., 11., 0., 0., -0., 0.],
-        #                            [-0., -0., 22., -0., 0., -0.],
-        #                            [-0., -0., -0., 22., -0., 4.],
-        #                            [-0., 0., 0., 0., 22., -5.],
-        #                            [-0., 0., 0., 0., 0., 21.]])
-
-        self.action_counter = 0
-
-        # Multiprocessing compute for patch
-        manager = mp.Manager()
-        self.lock = manager.Lock()
-        self.triggered_roll = manager.Value('d', 0)
-        self.triggered_pitch = manager.Value('d', 0)
-        self.triggered_yaw = manager.Value('d', 0)
-        state_update_flag = manager.Value('b', 0)
-        self._f_kp = manager.list(copy.deepcopy(self._patch_kp.reshape(36)))
-        self._f_kd = manager.list(copy.deepcopy(self._patch_kd.reshape(36)))
-        self.patch_process = None
-
-        if self.teacher_enable:
-            # self.mp_start()
-            pass
-        # queue = manager.Queue()
-        # queue = asyncio.Queue()
-
-        # state_triggered = mp.RawArray(ctypes.c_double, np.array([0] * 12))
-        # state_triggered = mp.RawArray(ctypes.c_double, np.array([0] * 12))
-
-    def mp_start(self):
-        data = {
-            'roll': self.triggered_roll,
-            'pitch': self.triggered_pitch,
-            'yaw': self.triggered_yaw,
-            'kp': self._patch_kp,
-            'kd': self._patch_kd
-        }
-        print("creating process for patch computing")
-        self.patch_process = mp.Process(
-            target=self.patch_compute, args=(self.triggered_roll, self.triggered_pitch, self.triggered_yaw,
-                                             self._f_kp, self._f_kd, self.lock)
-            # target=self.patch_compute, args=(data)
-        )
-
-        self.patch_process.daemon = True
-        print("starting patch process")
-        self.patch_process.start()
-        print(f"Pid of patch process: {self.patch_process.pid}")
-        # mat_process.join()
-
-    @staticmethod
-    def patch_compute2():
-        while True:
-            kp, kd = HATeacher.system_patch(0, 0, 0)
-            print(f"sub kp kd: {kp},\n{kd}")
-            print("compute from patch_compute2")
-            time.sleep(1)
-
-    # def patch_compute(self, roll, pitch, yaw, _f_kp, _f_kd, lock):
-    @staticmethod
-    def patch_compute(roll, pitch, yaw, _f_kp, _f_kd, lock):
-        try:
-            print("Starting a subprocess for LMI computation...")
-            path = "./robot/ha_teacher"
-            # mat_engine = matlab.engine.start_matlab()
-            # mat_engine.cd(path)
-            # print("Matlab current working directory is ---->>>", mat_engine.pwd())
-            while True:
-                # _state_trig = await _queue.get()  # get updated trigger state
-                print("LMI process computing...")
-                # print(f"update_flag value: {update_flag.value}")
-                # print(f"roll value: {roll.value}")
-                # print(f"pitch value: {pitch.value}")
-                # print(f"yaw value: {yaw.value}")
-                # print(f"_f_kp value: {_f_kp}")
-                # print(f"_f_kd value: {_f_kd}")
-
-                roll_v, pitch_v, yaw_v = roll.value, pitch.value, yaw.value
-                print(f"roll_v: {roll_v}")
-                print(f"pitch_v: {pitch_v}")
-                print(f"yaw_v: {yaw_v}")
-                print("Obtained new state, updating the patch gain with cvxpy")
-                F_kp, F_kd = HATeacher.system_patch(roll_v, pitch_v, yaw_v)
-                # lock.acquire()
-                for i in range(36):
-                    _f_kp[i] = np.asarray(F_kp).reshape(36)[i]
-                    _f_kd[i] = np.asarray(F_kd).reshape(36)[i]
-                # _f_kp.reshape(6, 6)
-                # _f_kd.reshape(6, 6)
-                print(f"type of _f_kp: {type(_f_kp)}")
-                # lock.release()
-                print("Patch gain is updated now ---->>>")
-                time.sleep(0.5)
-
-                # _lock.release()
-                # time.sleep(0.04)
-        except:
-            # traceback.print_exc(file=open("suberror.txt", "w+"))
-            error = traceback.format_exc()
-            print(f"subprocess error: {error}")
-            sys.stdout.flush()
-            return error
+        # self.action_counter = 0
+        self.action_counter = np.zeros(self._num_envs)
 
     def update(self, error_state: np.ndarray):
         """
-        Update real-time plant and corresponding patch center if state is unsafe
+        Update real-time plant and corresponding patch center if state is unsafe (error_state is 2d)
         """
-        print(f"error_state: {error_state}")
-        print(f"self._patch_center: {self._patch_center}")
+        # print(f"error_state: {error_state}")
+        # print(f"self._patch_center: {self._patch_center}")
 
         self._plant_state = error_state
-        # self._ref_state = ref_state
-        # self._error_state = error_state
-        energy = energy_value(state=error_state[2:], p_mat=MATRIX_P)
+        energy_2d = energy_value_2d(state=error_state[:, 2:], p_mat=MATRIX_P)
+        print(f"energy: {energy_2d}")
 
-        # HA-Teacher activated
-        if self._teacher_activate:
-            if self._dwell_step >= self.max_dwell_steps:
-                print(f"Reaching maximum dwell steps, deactivate HA-Teacher")
-                self._teacher_activate = False
+        # Find objects that need to be deactivated
+        to_deactivate = (self._dwell_step >= self.max_dwell_steps) & self._teacher_activate
+        print(f"to_deactivate: {to_deactivate}")
+        if np.any(to_deactivate):
+            indices = np.argwhere(to_deactivate)
+            for idx in indices:
+                print(f"Reaching maximum dwell steps at index {int(idx)}, deactivate HA-Teacher")
+            self._teacher_activate[to_deactivate] = False
+
+        # Find objects that need to be activated
+        to_activate = (energy_2d >= self.epsilon) & (~self._teacher_activate)
+        print(f"to_activate: {to_activate}")
+        if np.any(to_activate):
+            indices = np.argwhere(to_activate)
+            for idx in indices:
+                self._dwell_step[idx] = 0
+                self._teacher_activate[idx] = True  # Activate teacher
+                self._patch_center[tuple(idx)] = self._plant_state[tuple(idx)] * self.chi[tuple(idx)]
+                print(f"Activate HA-Teacher at {int(idx)} with new patch center: {self._patch_center[tuple(idx)]}")
+
+        # # HA-Teacher activated
+        # if self._teacher_activate:
+        #     if self._dwell_step >= self.max_dwell_steps:
+        #         print(f"Reaching maximum dwell steps, deactivate HA-Teacher")
+        #         self._teacher_activate = False
 
         # HA-Teacher deactivated
-        else:
-            # Outside envelope boundary
-            if energy >= self.epsilon:
-                self._dwell_step = 0
-                self._teacher_activate = True  # Activate teacher
-                self._patch_center = self._plant_state * self.chi  # Update patch center
-                print(f"Activate HA-Teacher and updated patch center is: {self._patch_center}")
-
-        return energy
-        # # Restore patch flag
-        # if energy < self.epsilon:
-        #     self._center_update = True
-        #
-        # # States unsafe (outside safety envelope)
         # else:
-        #     # Update patch center with current plant state
-        #     if self._center_update is True:
-        #         self._patch_center = self._plant_state * self.chi
-        #         self._center_update = False
+        #     # Outside envelope boundary
+        #     if energy >= self.epsilon:
+        #         self._dwell_step = 0
+        #         self._teacher_activate = True  # Activate teacher
+        #         self._patch_center = self._plant_state * self.chi  # Update patch center
+        #         print(f"Activate HA-Teacher and updated patch center is: {self._patch_center}")
 
-    def feedback_law(self, roll, pitch, yaw):
-        # roll = matlab.double(roll)s
-        # pitch = matlab.double(pitch)
-        # yaw = matlab.double(yaw)
-        # self._F_kp, self._F_kd = np.array(self.mat_engine.feedback_law2(roll, pitch, yaw, nargout=2))
-        # return self._F_kp, self._F_kd
-        return np.asarray(f_kp).reshape(6, 6), np.asarray(f_kd).reshape(6, 6)
+        return energy_2d
 
     def get_action(self):
         """
@@ -263,206 +117,70 @@ class HATeacher:
         """
         self.action_counter += 1
 
-        # If teacher deactivated
-        if self.teacher_enable is False or self._teacher_activate is False:
-            print(f"teacher is deactivated")
-            return None, False
+        actions = np.zeros((self._num_envs, 6))
+        dwell_flags = np.full(self._num_envs, False)
 
-        self.triggered_roll.value = self._plant_state[3]
-        self.triggered_pitch.value = self._plant_state[4]
-        self.triggered_yaw.value = self._plant_state[5]
+        # If All HA-Teacher disabled
+        if not np.any(self.teacher_enable):
+            print("All HA-teachers are disabled")
+            return actions, dwell_flags
 
-        # if self.action_counter % 200 == 0:
-        #     self.triggered_roll.value = self._plant_state[3]
-        #     self.triggered_pitch.value = self._plant_state[4]
-        #     self.triggered_yaw.value = self._plant_state[5]
-        #     # self._patch_kp = np.array(self._f_kp).reshape(6, 6)
-        #     # self._patch_kd = np.array(self._f_kd).reshape(6, 6)
-        #     for idx in range(36):
-        #         i = idx // 6
-        #         j = idx % 6
-        #         if self._f_kp[idx] != 0:
-        #             self._patch_kp[i][j] = self._f_kp[idx]
-        #         if self._f_kd[idx] != 0:
-        #             self._patch_kd[i][j] = self._f_kd[idx]
+        # If All HA-Teacher deactivated
+        if not np.any(self._teacher_activate):
+            print("All teachers are deactivated")
+            return actions, dwell_flags
 
-        def realtime_patch():
-            s = time.time()
-            roll, pitch, yaw = self._plant_state[3:6]
-            # roll = roll.numpy()
-            # pitch = pitch.numpy()
-            # yaw = yaw.numpy()
-            self._patch_kp, self._patch_kd = self.system_patch(roll=roll, pitch=pitch, yaw=yaw)
-            e = time.time()
-            print(f"roll pitch yaw: {roll}, {pitch}, {yaw}")
-            print(f"self._patch_kp: {self._patch_kp}")
-            print(f"self._patch_kd: {self._patch_kd}")
-            print(f"patch time: {e - s}")
-
-
-        # Turn on real-time patch
-        if self.apply_realtime_patch and self.action_counter % self.patch_interval == 0:
-            realtime_patch()
-
+        # Find the object that needs to be patched
+        to_patch = self.apply_realtime_patch & (self.action_counter % self.patch_interval == 0)
+        if np.any(to_patch):
+            indices = np.argwhere(to_patch)
+            for idx in indices:
+                print(f"Applying realtime patch at index {tuple(idx)}")
+                self.realtime_patch(int(idx))
         # Do not turn on
         # time.sleep(0.02)
 
-        s0 = time.time()
-        # self.triggered_roll.value = self._plant_state[3]
-        # self.triggered_pitch.value = self._plant_state[4]
-        # self.triggered_yaw.value = self._plant_state[5]
-        s1 = time.time()
-        # print(f"self._f_kp: {self._f_kp}")
-        # print(f"self._f_kd: {self._f_kd}")
-        # print(f"self._patch_kp: {self._patch_kp}")
-        # print(f"self._patch_kd: {self._patch_kd}")
-        # print(f"self._patch_center: {self._patch_center}")
-        # print(f"self._plant_state: {self._plant_state}")
-        s2 = time.time()
-        print(f"self._plant_state[:6] - self._patch_center[:6]: {self._plant_state[:6] - self._patch_center[:6]}")
+        # Find objects with HA-Teacher enabled and activated
+        ha_alive = self.teacher_enable & self._teacher_activate
+        indices = np.argwhere(ha_alive)
+        if indices.size == 0:
+            raise RuntimeError("ha_alive contains no True values, indices is empty. Check the code please")
 
-        # print(
-        #     f"self._patch_kp @ (self._plant_state[:6] - self._patch_center[:6]): {self._patch_kp @ (self._plant_state[:6] - self._patch_center[:6])}")
-        # print(
-        #     f"self._patch_kd @ (self._plant_state[6:] - self._patch_center[6:]): {self._patch_kd @ (self._plant_state[6:] - self._patch_center[6:])}")
-        teacher_action = np.squeeze(self._patch_kp @ (self._plant_state[:6] - self._patch_center[:6]) * -1
-                                    + self._patch_kd @ (self._plant_state[6:] - self._patch_center[6:]) * -1)
-        print(f"teacher_action: {teacher_action}")
+        # Set dwell flag for them
+        dwell_flags[indices] = True
 
-        # print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-        # print(f"patch_kp: {self._patch_kp}")
-        # print(f"patch_kd: {self._patch_kd}")
-        # print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        kp_mul_term = (self._plant_state[indices, :6] - self._patch_center[indices, :6]) * -1
+        kd_mul_term = (self._plant_state[indices, 6:] - self._patch_center[indices, 6:]) * -1
+        # print(f"kp_mul_term: {kp_mul_term}")
+        # print(f"kd_mul_term: {kd_mul_term}")
 
-        s3 = time.time()
-        # print(f"teacher_action part 1 time: {s1 - s0}")
-        # print(f"teacher_action part 2 time: {s2 - s1}")
-        # print(f"teacher_action part 3 time: {s3 - s2}")
-        # print(f"teacher_action total time: {s3 - s0}")
-        assert self._dwell_step <= self.max_dwell_steps
-        self._dwell_step += 1
-        print(f"HA-Teacher runs for dwell time: {self._dwell_step}/{self.max_dwell_steps}")
+        actions[indices.flatten()] = np.squeeze(self._patch_kp[indices] @ kp_mul_term[..., np.newaxis]
+                                                + self._patch_kd[indices] @ kd_mul_term[..., np.newaxis])
 
-        # self._phy_ddq = (kp @ (err_q - chi * state_trig[:6])
-        #                  + kd @ (err_dq - chi * state_trig[6:])).squeeze()
+        assert np.all(self._dwell_step <= self.max_dwell_steps)
 
-        return teacher_action, True
+        for idx in indices:
+            self._dwell_step[idx] += 1
+            print(f"HA-Teacher {int(idx)} runs for dwell time: "
+                  f"{int(self._dwell_step[idx])}/{int(self.max_dwell_steps[idx])}")
 
-    @staticmethod
-    def system_patch_old(roll, pitch, yaw):
-        """
-        Computes the patch gain with roll pitch yaw.
+        return actions, dwell_flags
 
-        Args:
-          roll: Roll angle (rad).
-          pitch: Pitch angle (rad).
-          yaw: Yaw angle (rad).
+    def realtime_patch(self, idx):
+        s = time.time()
+        roll, pitch, yaw = self._plant_state[idx, 3:6]
+        # roll_1d, pitch_1d, yaw_1d = self._plant_state[idx, 3:6]
+        # roll = roll.numpy()
+        # pitch = pitch.numpy()
+        # yaw = yaw.numpy()
+        self._patch_kp[idx, :], self._patch_kd[idx, :] = self.system_patch(roll=roll, pitch=pitch, yaw=yaw)
+        # self._patch_kp, self._patch_kd = self.system_patch_2d(roll_1d=roll_1d, pitch_1d=pitch_1d, yaw_1d=yaw_1d)
+        e = time.time()
+        print(f"roll pitch yaw: {roll}, {pitch}, {yaw}")
+        print(f"self._patch_kp: {self._patch_kp}")
+        print(f"self._patch_kd: {self._patch_kd}")
+        print(f"patch time: {e - s}")
 
-        Returns:
-          F_kp: Proportional feedback gain matrix.
-          F_kd: Derivative feedback gain matrix.
-        """
-
-        # Rotation matrices
-        Rx = np.array([[1, 0, 0],
-                       [0, np.cos(roll), -np.sin(roll)],
-                       [0, np.sin(roll), np.cos(roll)]])
-        Ry = np.array([[np.cos(pitch), 0, np.sin(pitch)],
-                       [0, 1, 0],
-                       [-np.sin(pitch), 0, np.cos(pitch)]])
-        Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0],
-                       [np.sin(yaw), np.cos(yaw), 0],
-                       [0, 0, 1]])
-        Rzyx = Rz.dot(Ry.dot(Rx))
-        # print(f"Rzyx: {Rzyx}")
-
-        Rzyx = np.array([[np.cos(yaw) / np.cos(pitch), np.sin(yaw) / np.cos(pitch), 0],
-                         [-np.sin(yaw), np.cos(yaw), 0],
-                         [np.cos(yaw) * np.tan(pitch), np.sin(yaw) * np.tan(pitch), 1]])
-
-        # Sampling period
-        T = 1 / 16  # 36 35 34
-
-        # System matrices (continuous-time)
-        aA = np.zeros((10, 10))
-        aA[0, 6] = 1
-        aA[1:4, 7:10] = Rzyx
-        aB = np.zeros((10, 6))
-        aB[4:, :] = np.eye(6)
-
-        # System matrices (discrete-time)
-        B = aB * T
-        A = np.eye(10) + T * aA
-
-        # bP = self.p_mat
-        bP = np.array([[140.1190891, 0, 0, -0, -0, 0, 3.7742345, -0, 0, -0],
-                       [0, 2.3e-06, 0, -0, -0, 0, 0, 1.4e-06, 0, 0],
-                       [0, 0, 2.3e-06, 0, -0, 0, 0, 0, 1.4e-06, 0],
-                       [-0, -0, 0, 467.9872184, 0, -0, -0, -0, 0, 152.9259161],
-                       [-0, -0, -0, 0, 2.9088242, 0, -0, -0, -0, 0],
-                       [0, 0, 0, -0, 0, 1.9e-06, -0, 0, 0, -0],
-                       [3.7742345, 0, 0, -0, -0, -0, 0.3773971, 0, 0, -0],
-                       [-0, 1.4e-06, 0, -0, -0, 0, 0, 1e-06, 0, -0],
-                       [0, 0, 1.4e-06, 0, -0, 0, 0, 0, 1e-06, 0],
-                       [-0, 0, 0, 152.9259161, 0, -0, -0, -0, 0, 155.2407021]]) * 1
-
-        eta = 2  # 2
-        # beta = 0.24
-        beta = 0.2
-        # beta = 0.3        # also works in simulation
-        kappa = 0.001
-
-        Q = cp.Variable((10, 10), PSD=True)
-        R = cp.Variable((6, 10))
-
-        w = 7
-
-        constraints = [
-            cp.bmat([
-                [(beta - (1 + (1 / w)) * kappa * eta) * Q, Q @ A.T + R.T @ B.T],
-                [A @ Q + B @ R, Q / (1 + w)]
-            ]) >> 0,
-            np.eye(10) - Q @ bP >> 0
-        ]
-
-        # Define problem and objective
-        problem = cp.Problem(cp.Minimize(0), constraints)
-
-        # Solve the problem
-        # problem.solve()
-        problem.solve(solver=cp.CVXOPT)
-
-        # Extract optimal values
-        # Check if the problem is solved successfully
-        if problem.status == 'optimal':
-            print("Optimization successful.")
-        else:
-            print("Optimization failed.")
-
-        optimal_Q = Q.value
-        optimal_R = R.value
-        P = np.linalg.inv(optimal_Q)
-
-        # Compute aF
-        aF = np.round(aB @ optimal_R @ P, 0)
-
-        Fb2 = aF[6:10, 0:4]
-
-        # Compute F_kp and F_kd
-        F_kp = -np.block([
-            [np.zeros((2, 6))],
-            [np.zeros((4, 2)), Fb2]])
-        F_kd = -aF[4:10, 4:10]
-
-        # Check if the problem is solved successfully
-        if np.all(np.linalg.eigvals(P) > 0):
-            print("LMIs feasible")
-        else:
-            print("LMIs infeasible")
-
-        return F_kp, F_kd
-
-    import tensorflow as tf
     # from numba import njit, jit
     @staticmethod
     # @tf.function
@@ -598,8 +316,8 @@ class HATeacher:
         # Compute F_kd
         F_kd = -aF[4:10, 4:10]
 
-        print(f"F_kp is: {F_kp}")
-        print(f"F_kd is: {F_kd}")
+        print(f"Solved F_kp is: {F_kp}")
+        print(f"Solved F_kd is: {F_kd}")
 
         # Check if the problem is solved successfully
         if np.all(np.linalg.eigvals(P) > 0):
@@ -612,17 +330,18 @@ class HATeacher:
 
         return F_kp, F_kd
 
-    @property
-    def ref_state(self):
-        return self._ref_state
+    def system_patch_2d(self, roll_1d, pitch_1d, yaw_1d):
+        kp, kd = [], []
+        for i in range(len(roll_1d)):
+            r, p, y = roll_1d[i], pitch_1d[i], yaw_1d[i]
+            _kp, _kd = self.system_patch(r, p, y)
+            kp.append(_kp)
+            kd.append(_kd)
+        return np.asarray(kp), np.asarray(kd)
 
     @property
     def plant_state(self):
         return self._plant_state
-
-    @property
-    def error_state(self):
-        return self._error_state
 
     @property
     def patch_center(self):

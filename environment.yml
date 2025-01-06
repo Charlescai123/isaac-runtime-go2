@@ -1,0 +1,10 @@
+name: phyrl-go2
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pybind11 # conda install -c conda-forge pybind11
+  - pip:
+      - -r requirements.txt
