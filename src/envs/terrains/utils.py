@@ -1,3 +1,4 @@
+import time
 import warnings
 import numpy as np
 from isaacgym import gymtorch, gymapi
@@ -6,7 +7,7 @@ from isaacgym.terrain_utils import *
 ASSET_ROOT = "resources/terrains"
 
 STONE_ASSET = "stone.urdf"
-CEMENT_ASSET = "plane/cement.urdf"
+CEMENT_ROAD_ASSET = "plane/cement_road.urdf"
 
 
 def random_quaternion():
@@ -25,9 +26,12 @@ def load_cement_road_asset(gym, sim, env, name="cement_road", collision_group=-1
     x, y, z = pos[:]
     X, Y, Z, W = rot[:]
     transform = gymapi.Transform(p=gymapi.Vec3(x, y, z), r=gymapi.Quat(X, Y, Z, W))
+    print(f"transform.p: {transform.p}")
+    print(f"transform.r: {transform.r}")
+    # time.sleep(123)
 
     asset_root = ASSET_ROOT
-    asset_urdf = CEMENT_ASSET
+    asset_urdf = CEMENT_ROAD_ASSET
     asset_options = gymapi.AssetOptions()
 
     # Load materials from meshes
@@ -96,46 +100,7 @@ def load_stone_asset(gym, sim, env, name="stone", pos=(0, 0, 0), rot=(0, 0, 0, 1
     return actor_stone
 
 
-def load_random_snowstones_in_a_region(gym, sim, env, scene_offset_x=40, width=4.0, length=5.0, stone_nums=10,
-                                       reverse=False):
-    if reverse:
-        offset_x = -13 + scene_offset_x
-    else:
-        offset_x = 8.1 + scene_offset_x
-    offset_y = -1.8
-    np.random.seed(25)
-    for i in range(stone_nums):
-        random_width = np.random.uniform(low=0, high=width)
-        random_length = np.random.uniform(low=0, high=length)
-        random_quat = random_quaternion()
-        scale = np.random.uniform(low=0.1, high=0.18)
 
-        x = offset_x + random_length
-        y = offset_y + random_width
-
-        load_stone_asset(gym=gym, sim=sim, env=env, name=f"snow_stones{i}", pos=(x, y, 0.03), fix_base_link=False,
-                         rot=tuple(random_quat), apply_texture=False, scale=scale)
-
-
-def load_random_cobblestones_in_a_region(gym, sim, env, scene_offset_x=40, width=2.0, length=2.0, stone_nums=10,
-                                         reverse=False):
-    if reverse:
-        offset_x = -8.1 + scene_offset_x
-    else:
-        offset_x = 6 + scene_offset_x
-    offset_y = -0.985
-    np.random.seed(12)
-    for i in range(stone_nums):
-        random_width = np.random.uniform(low=0, high=width)
-        random_length = np.random.uniform(low=0, high=length)
-        random_quat = random_quaternion()
-        scale = np.random.uniform(low=0.06, high=0.08)
-
-        x = offset_x + random_length
-        y = offset_y + random_width
-
-        load_stone_asset(gym=gym, sim=sim, env=env, pos=(x, y, 0.007), name=f"cobblestones{i}", fix_base_link=True,
-                         rot=tuple(random_quat), apply_texture=True, scale=scale)
 
 
 def add_uneven_terrains(gym, sim, scene_offset_x=40, reverse=False):

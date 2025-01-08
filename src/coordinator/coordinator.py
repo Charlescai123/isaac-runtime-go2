@@ -57,19 +57,9 @@ class Coordinator:
 
             # Teacher activated
             if self._last_action_mode[i] == ActionMode.TEACHER:
-                print(f"dwell_flag[{i}]: {dwell_flag[i]}")
-                print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
+
                 # Teacher Dwell time
                 if dwell_flag[i]:
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-                    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-
                     if ha_action[i] is None:
                         raise RuntimeError(f"Unrecognized HA-Teacher action {ha_action[i]} from {i} for dwelling")
                     else:

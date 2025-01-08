@@ -40,25 +40,26 @@ class HATeacher:
         self.patch_interval = np.array([5] * self._num_envs)
 
         # Patch kp and kd
-        # self._patch_kp = np.diag((0., 0., 100., 100., 100., 0.))
-        # self._patch_kd = np.diag((40., 30., 10., 10., 10., 30.))
+        # self._default_kp = np.diag((0., 0., 100., 100., 100., 0.))
+        # self._default_kd = np.diag((40., 30., 10., 10., 10., 30.))
         # self.apply_realtime_patch = False
         self.apply_realtime_patch = np.array([True] * self._num_envs)
-        #
-        #
-        self._patch_kp = np.array([[[-0., -0., -0., -0., -0., -0.],
-                                    [-0., -0., -0., -0., -0., -0.],
-                                    [-0., -0., 296., 0., - 0., 0.],
-                                    [-0., -0., - 0., 200., 0, 0],
-                                    [-0., -0., 0., 0, 200, 0],
-                                    [-0., -0., 0., 0, -0., 194]]] * self._num_envs)
 
-        self._patch_kd = np.array([[[31., 0., 0., -0., 0., 0.],
-                                    [0., 13., -0., 0., -0, 0.],
-                                    [0., -0., 28., 0., -0., 0.],
-                                    [0., 0., -0., 26, 0., 0.],
-                                    [-0., 0., 0., -0., 26., -0.],
-                                    [0., 0., 0., 0., -0., 25.]]] * self._num_envs)
+        self._default_kp = np.array([[-0., -0., -0., -0., -0., -0.],
+                                     [-0., -0., -0., -0., -0., -0.],
+                                     [-0., -0., 296., 0., - 0., 0.],
+                                     [-0., -0., - 0., 200., 0, 0],
+                                     [-0., -0., 0., 0, 200, 0],
+                                     [-0., -0., 0., 0, -0., 194]])
+        self._default_kd = np.array([[31., 0., 0., -0., 0., 0.],
+                                     [0., 13., -0., 0., -0, 0.],
+                                     [0., -0., 28., 0., -0., 0.],
+                                     [0., 0., -0., 26, 0., 0.],
+                                     [-0., 0., 0., -0., 26., -0.],
+                                     [0., 0., 0., 0., -0., 25.]]) * 4
+
+        self._patch_kp = np.array([self._default_kp] * self._num_envs)
+        self._patch_kd = np.array([self._default_kd] * self._num_envs)
 
         # self.action_counter = 0
         self.action_counter = np.zeros(self._num_envs)
@@ -135,7 +136,7 @@ class HATeacher:
         if np.any(to_patch):
             indices = np.argwhere(to_patch)
             for idx in indices:
-                print(f"Applying realtime patch at index {tuple(idx)}")
+                print(f"Applying realtime patch at index {int(idx)}")
                 self.realtime_patch(int(idx))
         # Do not turn on
         # time.sleep(0.02)

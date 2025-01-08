@@ -1,4 +1,6 @@
 """Environment wrappers for normalizing RL environments."""
+import time
+
 from isaacgym.torch_utils import to_torch
 import torch
 

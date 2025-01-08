@@ -1,6 +1,6 @@
 # Blender v2.66 (sub 1) OBJ File: ''
 # www.blender.org
-mtllib cement.mtl
+mtllib cement_road.mtl
 o Plane
 v 100.000000 -100.000000 0.000000
 v 100.000000 100.000000 0.000000

@@ -7,7 +7,7 @@ import torch
 from qpth.qp import QPFunction, QPSolvers
 
 from src.envs.robots.motors import MotorCommand
-from src.envs.robots.utilities.rotation_utils import quat_to_rot_mat
+from src.envs.robots.utils.rotation_utils import quat_to_rot_mat
 
 
 @torch.jit.script
@@ -72,6 +72,7 @@ def compute_desired_acc(
     ang_pos_error = compute_orientation_error(desired_base_orientation_rpy,
                                               base_quat,
                                               device=device)
+
     ang_vel_error = desired_angular_velocity - torch.matmul(
         base_rot_mat, base_angular_velocity_body_frame[:, :, None])[:, :, 0]
     desired_ang_acc_gravity_frame = (base_orientation_kp * ang_pos_error +
@@ -348,8 +349,10 @@ class QPTorqueOptimizer:
                  base_orientation_kd=np.array([10., 10., 10.]),
                  weight_ddq=np.diag([1., 1., 10., 10., 10., 1.]),
                  weight_grf=1e-4,
-                 body_mass=13.076,
-                 body_inertia=np.array([0.14, 0.35, 0.35]) * 0.5,
+                 body_mass=15.019,
+                 body_inertia=np.array([[0.1585, 0.0001, -0.0155],
+                                        [0.0001, 0.4686, 0.],
+                                        [-0.0155, 0., 0.5245]]),
                  desired_body_height=0.26,
                  foot_friction_coef=0.7,
                  clip_grf=False,
@@ -396,8 +399,9 @@ class QPTorqueOptimizer:
         self._Wf = to_torch(weight_grf, device=self._device)
         self._foot_friction_coef = foot_friction_coef
         self._inv_mass = torch.eye(3, device=self._device) / body_mass
-        self._inv_inertia = torch.linalg.inv(
-            torch.diag(to_torch(body_inertia, device=self._device)))
+        print(f"body_inertia: {body_inertia}")
+        print(f"body_inertia: {body_inertia.shape}")
+        self._inv_inertia = torch.linalg.inv(to_torch(body_inertia, device=self._device))
 
     def _solve_joint_torques(self, foot_contact_state, desired_com_ddq):
         """Solves centroidal QP to find desired joint torques."""

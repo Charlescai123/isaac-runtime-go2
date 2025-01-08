@@ -10,9 +10,9 @@ import numpy as np
 import torch
 
 from src.configs.defaults import sim_config
-from src.envs.robots.controllers import phase_gait_generator
+from src.envs.robots.controller import phase_gait_generator
 from src.envs.robots import go2
-from src.envs.robots import MotorCommand, MotorControlMode
+from src.envs.robots.motors import MotorCommand, MotorControlMode
 
 flags.DEFINE_integer("num_envs", 10, "number of environments to create.")
 flags.DEFINE_float("total_time_secs", 2.,

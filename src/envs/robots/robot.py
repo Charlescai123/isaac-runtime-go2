@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from src.configs.defaults import asset_options as asset_options_config
-from src.envs.robots.utilities.rotation_utils import quat_to_rot_mat, get_euler_xyz_from_quaternion
+from src.envs.robots.utils.rotation_utils import quat_to_rot_mat, get_euler_xyz_from_quaternion
 
 from isaacgym.terrain_utils import *
 
@@ -27,6 +27,7 @@ class Robot:
             self,
             sim: Any,
             viewer: Any,
+            world_env: Any,
             num_envs: int,
             init_positions: torch.Tensor,
             urdf_path: str,
@@ -44,6 +45,7 @@ class Robot:
         self._sim_config = sim_config
         self._device = self._sim_config.sim_device
         self._num_envs = num_envs
+        self._world_env_type = world_env
 
         self._motors = motors
         self._feet_names = feet_names
@@ -60,7 +62,10 @@ class Robot:
         self._base_init_state = self._compute_base_init_state(init_positions)
         self._init_motor_angles = self._motors.init_positions
         self._envs = []
-        self._actors = []
+        self._world_envs = []
+        self._robot_actors = []
+        self._robot_actors_global_indices = []
+        self._robot_rigid_body_global_indices = []
         self._time_since_reset = torch.zeros(self._num_envs, device=self._device)
 
         self.record_video = True  # Record a video or not
@@ -70,7 +75,25 @@ class Robot:
             torch._C._jit_set_profiling_executor(False)
 
         self._load_urdf(urdf_path)
-        # self._gym.prepare_sim(self._sim)
+        self._gym.prepare_sim(self._sim)
+
+        # # 初次渲染
+        # gym = self._gym
+        # gym.simulate(self._sim)
+        # gym.fetch_results(sim, True)
+        # gym.step_graphics(sim)
+        # gym.draw_viewer(self._viewer, sim, True)
+        #
+        # # 持续渲染
+        # while not gym.query_viewer_has_closed(self._viewer):
+        #     gym.simulate(sim)
+        #     gym.fetch_results(sim, True)
+        #     gym.step_graphics(sim)
+        #     gym.draw_viewer(self._viewer, sim, True)
+        #
+        # # 清理资源
+        # gym.destroy_viewer(self._viewer)
+        # gym.destroy_sim(sim)
 
         self._frames = []
         self._camera_handle = self.add_camera()
@@ -112,57 +135,11 @@ class Robot:
         # init_states[:, :3] = 0.5
         return to_torch(init_states, device=self._device)
 
-    def load_centiment_road(self, env, gym, sim, i, pos=(0, 0, 0), rot=(0, 0, 0, 1), apply_texture=True, scale=1.):
-        x, y, z = pos[:]
-        X, Y, Z, W = rot[:]
-        transform = gymapi.Transform(p=gymapi.Vec3(x, y, z), r=gymapi.Quat(X, Y, Z, W))
-
-        asset_root = "resources/terrains"
-        asset_urdf = "plane/cement.urdf"
-        asset_options = gymapi.AssetOptions()
-        env_lower = gymapi.Vec3(0., 0., 0.)
-        env_upper = gymapi.Vec3(0., 0., 0)
-
-        # Load materials from meshes
-        asset_options.use_mesh_materials = apply_texture
-        asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-
-        # Override the bogus inertia tensors and center-of-mass properties in the YCB assets.
-        # These flags will force the inertial properties to be recomputed from geometry.
-        asset_options.override_inertia = False
-        asset_options.override_com = False
-        asset_options.fix_base_link = True
-        asset_options.disable_gravity = False
-
-        # use default convex decomposition params
-        # asset_options.vhacd_enabled = True
-        asset_stone = gym.load_asset(sim, asset_root, asset_urdf, asset_options)
-
-        # create envs
-        # env = gym.create_env(sim, env_lower, env_upper, 1)
-        actor_snow_road = gym.create_actor(env, asset_stone, transform, 'cement_road', i, 1)
-
-        # rigid_shape_props = gym.get_actor_rigid_shape_properties(env, actor_snow_road)
-        #
-        # for shape in rigid_shape_props:
-        #     shape.friction = 10.
-        #     shape.rolling_friction = 10.
-        #     shape.torsion_friction = 10.
-        #     # shape.compliance = 0
-        #     # shape.restitution = 0
-        #
-        # gym.set_actor_rigid_shape_properties(env, actor_snow_road, rigid_shape_props)
-
-        # scale_status = gym.set_actor_scale(env, actor_snow_road, scale)
-
-        # if scale_status:
-        #     print(f"Set actor scale successfully")
-        # else:
-        #     warnings.warn(f"Failed to set the actor scale")
-
-        return actor_snow_road
-
     def _load_urdf(self, urdf_path):
+        """Since Isaacgym does not allow separating the environment creation process from the actor creation process
+        due to its low-level optimization mechanism (the engine requires prior knowledge of the number of actors in
+        each env for performance optimization), we have integrated both into the Robot class. While this introduces
+        some redundancy in the code, it adheres to the design principles of Isaacgym."""
 
         asset_root = os.path.dirname(urdf_path)
         asset_file = os.path.basename(urdf_path)
@@ -172,8 +149,9 @@ class Robot:
         self._num_dof = self._gym.get_asset_dof_count(self._robot_asset)
         self._num_bodies = self._gym.get_asset_rigid_body_count(self._robot_asset)
 
-        env_lower = gymapi.Vec3(0., 0., 0.)
-        env_upper = gymapi.Vec3(0., 0., 0.)
+        spacing = 10.
+        env_lower = gymapi.Vec3(-spacing, -spacing, 0.)
+        env_upper = gymapi.Vec3(spacing, spacing, spacing)
         for i in range(self._num_envs):
             env_handle = self._gym.create_env(self._sim, env_lower, env_upper,
                                               int(np.sqrt(self._num_envs)))
@@ -181,49 +159,53 @@ class Robot:
             start_pose.p = gymapi.Vec3(*self._base_init_state[i, :3])
             # start_pose.r = gymapi.Quat(*self._base_init_state[i, 3:7])
             actor_handle = self._gym.create_actor(env_handle, self._robot_asset,
-                                                  start_pose, f"actor", i,
+                                                  start_pose, f"robot", i,
                                                   asset_config.self_collisions, 0)
-
             # Add outdoor scene
-            # self.load_outdoor_asset(env=env_handle, gym=self._gym, sim=self._sim, i=i, reverse=False)
-
-            # Add uneven terrains
-            self.add_uneven_terrains(gym=self._gym, sim=self._sim, reverse=False)
+            world_env = self._world_env_type(
+                sim=self._sim,
+                gym=self._gym,
+                viewer=self._viewer,
+                env_handle=env_handle
+            )
 
             self._gym.enable_actor_dof_force_sensors(env_handle, actor_handle)
             self._envs.append(env_handle)
-            self._actors.append(actor_handle)
+            self._world_envs.append(world_env)
+            self._robot_actors.append(actor_handle)
 
+        # Robot indices in IsaacGym
         self._feet_indices = torch.zeros(len(self._feet_names),
                                          dtype=torch.long,
                                          device=self._device,
                                          requires_grad=False)
-        for i in range(len(self._feet_names)):
-            self._feet_indices[i] = self._gym.find_actor_rigid_body_handle(
-                self._envs[0], self._actors[0], self._feet_names[i])
-
         self._calf_indices = torch.zeros(len(self._calf_names),
                                          dtype=torch.long,
                                          device=self._device,
                                          requires_grad=False)
-        for i in range(len(self._calf_names)):
-            self._calf_indices[i] = self._gym.find_actor_rigid_body_handle(
-                self._envs[0], self._actors[0], self._calf_names[i])
-
         self._thigh_indices = torch.zeros(len(self._thigh_names),
                                           dtype=torch.long,
                                           device=self._device,
                                           requires_grad=False)
-        for i in range(len(self._thigh_names)):
-            self._thigh_indices[i] = self._gym.find_actor_rigid_body_handle(
-                self._envs[0], self._actors[0], self._thigh_names[i])
-
         self._body_indices = torch.zeros(self._num_bodies - len(self._feet_names) -
                                          len(self._thigh_names) -
                                          len(self._calf_names),
                                          dtype=torch.long,
                                          device=self._device)
-        all_body_names = self._gym.get_actor_rigid_body_names(self._envs[0], 0)
+
+        for i in range(len(self._feet_names)):
+            self._feet_indices[i] = self._gym.find_actor_rigid_body_index(
+                self._envs[0], self._robot_actors[0], self._feet_names[i], gymapi.DOMAIN_ENV)
+
+        for i in range(len(self._calf_names)):
+            self._calf_indices[i] = self._gym.find_actor_rigid_body_index(
+                self._envs[0], self._robot_actors[0], self._calf_names[i], gymapi.DOMAIN_ENV)
+
+        for i in range(len(self._thigh_names)):
+            self._thigh_indices[i] = self._gym.find_actor_rigid_body_index(
+                self._envs[0], self._robot_actors[0], self._thigh_names[i], gymapi.DOMAIN_ENV)
+
+        all_body_names = self._gym.get_actor_rigid_body_names(self._envs[0], self._robot_actors[0])
         self._body_names = []
         limb_names = self._thigh_names + self._calf_names + self._feet_names
         idx = 0
@@ -231,90 +213,12 @@ class Robot:
         for name in all_body_names:
             if name not in limb_names:
                 self._body_indices[idx] = self._gym.find_actor_rigid_body_handle(
-                    self._envs[0], self._actors[0], name)
+                    self._envs[0], self._robot_actors[0], name)
                 idx += 1
                 self._body_names.append(name)
-        # print(f"all_body_names: {all_body_names}")
-        # print(f"feet_indices: {self._feet_indices}")
-        # print(f"calf_indices: {self._calf_indices}")
-        # print(f"thigh_indices: {self._thigh_indices}")
-        # print(f"body_indices: {self._body_indices}")
-        # print(f"body_names: {self._body_names}")
-        # time.sleep(123)
 
+        self._num_rigid_body_per_env = self._gym.get_env_rigid_body_count(self._envs[0])
 
-    def _load_urdf_new(self, urdf_path):
-
-        asset_root = os.path.dirname(urdf_path)
-        asset_file = os.path.basename(urdf_path)
-        asset_config = asset_options_config.get_config()
-        self._robot_asset = self._gym.load_asset(self._sim, asset_root, asset_file,
-                                                 asset_config.asset_options)
-        self._num_dof = self._gym.get_asset_dof_count(self._robot_asset)
-        self._num_bodies = self._gym.get_asset_rigid_body_count(self._robot_asset)
-
-        env_lower = gymapi.Vec3(0., 0., 0.)
-        env_upper = gymapi.Vec3(0., 0., 0.)
-        for i in range(self._num_envs):
-            env_handle = self._gym.create_env(self._sim, env_lower, env_upper,
-                                              int(np.sqrt(self._num_envs)))
-            start_pose = gymapi.Transform()
-            start_pose.p = gymapi.Vec3(*self._base_init_state[i, :3])
-            # start_pose.r = gymapi.Quat(*self._base_init_state[i, 3:7])
-            actor_handle = self._gym.create_actor(env_handle, self._robot_asset,
-                                                  start_pose, f"actor", i,
-                                                  asset_config.self_collisions, 0)
-
-            # Add outdoor scene
-            self.load_outdoor_asset(env=env_handle, gym=self._gym, sim=self._sim, i=i, reverse=False)
-
-            # Add uneven terrains
-            self.add_uneven_terrains(gym=self._gym, sim=self._sim, reverse=False)
-
-            self._gym.enable_actor_dof_force_sensors(env_handle, actor_handle)
-            self._envs.append(env_handle)
-            self._actors.append(actor_handle)
-
-        self._feet_indices = torch.zeros(len(self._feet_names),
-                                         dtype=torch.long,
-                                         device=self._device,
-                                         requires_grad=False)
-        for i in range(len(self._feet_names)):
-            self._feet_indices[i] = self._gym.find_actor_rigid_body_handle(
-                self._envs[0], self._actors[0], self._feet_names[i])
-
-        self._calf_indices = torch.zeros(len(self._calf_names),
-                                         dtype=torch.long,
-                                         device=self._device,
-                                         requires_grad=False)
-        for i in range(len(self._calf_names)):
-            self._calf_indices[i] = self._gym.find_actor_rigid_body_handle(
-                self._envs[0], self._actors[0], self._calf_names[i])
-
-        self._thigh_indices = torch.zeros(len(self._thigh_names),
-                                          dtype=torch.long,
-                                          device=self._device,
-                                          requires_grad=False)
-        for i in range(len(self._thigh_names)):
-            self._thigh_indices[i] = self._gym.find_actor_rigid_body_handle(
-                self._envs[0], self._actors[0], self._thigh_names[i])
-
-        self._body_indices = torch.zeros(self._num_bodies - len(self._feet_names) -
-                                         len(self._thigh_names) -
-                                         len(self._calf_names),
-                                         dtype=torch.long,
-                                         device=self._device)
-        all_body_names = self._gym.get_actor_rigid_body_names(self._envs[0], 0)
-        self._body_names = []
-        limb_names = self._thigh_names + self._calf_names + self._feet_names
-        idx = 0
-        # foot_name_ = ['FR_hip']
-        for name in all_body_names:
-            if name not in limb_names:
-                self._body_indices[idx] = self._gym.find_actor_rigid_body_handle(
-                    self._envs[0], self._actors[0], name)
-                idx += 1
-                self._body_names.append(name)
         # print(f"all_body_names: {all_body_names}")
         # print(f"feet_indices: {self._feet_indices}")
         # print(f"calf_indices: {self._calf_indices}")
@@ -325,11 +229,11 @@ class Robot:
 
     def set_foot_friction(self, friction_coef, env_id=0):
         rigid_shape_props = self._gym.get_actor_rigid_shape_properties(
-            self._envs[env_id], self._actors[env_id])
+            self._envs[env_id], self._robot_actors[env_id])
         for idx in range(len(rigid_shape_props)):
             rigid_shape_props[idx].friction = friction_coef
         self._gym.set_actor_rigid_shape_properties(self._envs[env_id],
-                                                   self._actors[env_id],
+                                                   self._robot_actors[env_id],
                                                    rigid_shape_props)
         # import pdb
         # pdb.set_trace()
@@ -341,299 +245,85 @@ class Robot:
         for env_id, friction_coef in zip(env_ids, friction_coefs):
             self.set_foot_friction(friction_coef, env_id=env_id)
 
-    def load_stone_asset(self, env, gym, sim, i, pos=(0, 0, 0), rot=(0, 0, 0, 1), scale=1., fix_base_link=False,
-                         apply_texture=True, override_inertia=False, override_com=False, disable_gravity=False):
-        x, y, z = pos[:]
-        X, Y, Z, W = rot[:]
-        transform = gymapi.Transform(p=gymapi.Vec3(x, y, z), r=gymapi.Quat(X, Y, Z, W))
-
-        asset_root = "resources/terrains"
-        asset_urdf = "stone.urdf"
-        asset_options = gymapi.AssetOptions()
-        env_lower = gymapi.Vec3(0., 0., 0.)
-        env_upper = gymapi.Vec3(0., 0., 0)
-
-        # Load materials from meshes
-        asset_options.default_dof_drive_mode = 0
-        asset_options.use_mesh_materials = apply_texture
-        asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-
-        # Override the bogus inertia tensors and center-of-mass properties in the YCB assets.
-        # These flags will force the inertial properties to be recomputed from geometry.
-        asset_options.override_inertia = override_inertia
-        asset_options.override_com = override_com
-        asset_options.fix_base_link = fix_base_link
-        asset_options.disable_gravity = disable_gravity
-
-        # use default convex decomposition params
-        # asset_options.vhacd_enabled = True
-        asset_stone = gym.load_asset(sim, asset_root, asset_urdf, asset_options)
-
-        # create envs
-        # env = gym.create_env(sim, env_lower, env_upper, 10)
-        actor_stone = gym.create_actor(env, asset_stone, transform, 'stone', i, 1)
-        scale_status = gym.set_actor_scale(env, actor_stone, scale)
-        # scale_status = False
-        # if scale_status:
-        #     print(f"Set stone actor scale successfully")
-        # else:
-        #     warnings.warn(f"Failed to set the actor scale")
-
-        return actor_stone
-
-    def random_quaternion(self):
-        u1, u2, u3 = np.random.uniform(0.0, 1.0, 3)
-
-        w = np.sqrt(1 - u1) * np.sin(2 * np.pi * u2)
-        x = np.sqrt(1 - u1) * np.cos(2 * np.pi * u2)
-        y = np.sqrt(u1) * np.sin(2 * np.pi * u3)
-        z = np.sqrt(u1) * np.cos(2 * np.pi * u3)
-
-        return np.array([w, x, y, z])
-
-    def load_random_snowstones_in_a_region(self, env, gym, sim, i, width=4.0, length=5.0, stone_nums=10, reverse=False):
-        # terrain_width = 12.
-        # terrain_length = 12.
-        # horizontal_scale = 0.1  # [m] resolution in x
-        # vertical_scale = 0.01  # [m] resolution in z
-        # num_rows = int(terrain_width / horizontal_scale)
-        # num_cols = int(terrain_length / horizontal_scale)
-        # heightfield = np.zeros((num_terrains * num_rows, num_cols), dtype=np.int16)
-
-        if reverse:
-            offset_x = -13 + self._scene_offset_x
-        else:
-            offset_x = 8.1 + self._scene_offset_x
-        offset_y = -1.8
-        np.random.seed(25)
-        for j in range(stone_nums):
-            random_width = np.random.uniform(low=0, high=width)
-            random_length = np.random.uniform(low=0, high=length)
-            random_quat = self.random_quaternion()
-            scale = np.random.uniform(low=0.1, high=0.18)
-
-            x = offset_x + random_length
-            y = offset_y + random_width
-
-            self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(x, y, 0.03), fix_base_link=False,
-                                  rot=tuple(random_quat), apply_texture=False, scale=scale)
-
-    def load_random_sandstones_in_a_region(self, env, gym, sim, i, width=2.0, length=2.0, stone_nums=10, reverse=False):
-        # terrain_width = 12.
-        # terrain_length = 12.
-        # horizontal_scale = 0.1  # [m] resolution in x
-        # vertical_scale = 0.01  # [m] resolution in z
-        # num_rows = int(terrain_width / horizontal_scale)
-        # num_cols = int(terrain_length / horizontal_scale)
-        # heightfield = np.zeros((num_terrains * num_rows, num_cols), dtype=np.int16)
-
-        if reverse:
-            offset_x = -8.1 + self._scene_offset_x
-        else:
-            offset_x = 6 + self._scene_offset_x
-        offset_y = -0.985
-        np.random.seed(12)
-        for j in range(stone_nums):
-            random_width = np.random.uniform(low=0, high=width)
-            random_length = np.random.uniform(low=0, high=length)
-            random_quat = self.random_quaternion()
-            scale = np.random.uniform(low=0.06, high=0.08)
-
-            x = offset_x + random_length
-            y = offset_y + random_width
-
-            self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(x, y, 0.007), fix_base_link=True,
-                                  rot=tuple(random_quat), apply_texture=True, scale=scale)
-
-    def load_outdoor_asset(self, env, gym, sim, i, reverse=False):
-        # set up the env grid
-        envs_per_row = 20
-        spacing = 0.5
-        env_lower = gymapi.Vec3(-spacing, 0.0, -spacing)
-        env_upper = gymapi.Vec3(spacing, spacing, spacing)
-        # env_lower = gymapi.Vec3(-1., -1., -1.)
-        # env_upper = gymapi.Vec3(1., 1., 1)
-
-        # initial root pose for actors
-        initial_pose = gymapi.Transform()
-        initial_pose.p = gymapi.Vec3(6.0, -2.0, 0.)
-
-        asset_root = "resources/terrains"
-        asset_options = gymapi.AssetOptions()
-
-        # Load materials from meshes
-        asset_options.use_mesh_materials = True
-        asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-
-        # Override the bogus inertia tensors and center-of-mass properties in the YCB assets.
-        # These flags will force the inertial properties to be recomputed from geometry.
-        asset_options.override_inertia = True
-        asset_options.override_com = True
-        asset_options.fix_base_link = False
-
-        # don't use convex decomposition
-        # asset_options.vhacd_enabled = False
-        # asset2 = gym.load_asset(sim, asset_root, "assets/arrow.urdf", asset_options)
-        # asset2 = gym.load_asset(sim, f"{asset_root}/data", "terrain.urdf", asset_options)
-
-        if reverse:
-            offset_x = -28 + self._scene_offset_x
-        else:
-            offset_x = 0 + self._scene_offset_x
-        offset_y = 4
-
-        # Directional Arrow
-        # load_arrow_asset(gym=gym, sim=sim, i=0, pos=(3 + offset_x, -2 + offset_y, 0.), rot=(1, 0, 0, 0),
-        #                  apply_texture=False, scale=1.2)
-        # load_arrow_asset(gym=gym, sim=sim, i=1, pos=(3 + offset_x, -6 + offset_y, 0.), rot=(1, 0, 0, 0),
-        #                  apply_texture=True, scale=1.2)
-
-        # Mountain Rocks
-        # self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(1 + offset_x, -3 + offset_y, 0.1), rot=(1, 0, 0, 0),
-        #                       apply_texture=True, scale=0.5)
-        # self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(4 + offset_x, -3 + offset_y, 0.1), rot=(0, 1, 0, 0),
-        #                       apply_texture=True, scale=1.0)
-        # self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(2 + offset_x, -4.1 + offset_y, 0.1),
-        #                       rot=(1, 0, 0, 0),
-        #                       apply_texture=True, scale=0.5)
-        # self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(6 + offset_x, -6 + offset_y, 0.1), rot=(0, 1, 0, 0),
-        #                       apply_texture=True, scale=1.0)
-
-        # Snow road
-        # self.load_snow_road(gym=gym, sim=sim, env=env, i=i, pos=(4 + offset_x, -4 + offset_y, 0.001),
-        #                     apply_texture=True, scale=1.0)
-        if reverse:
-            self.load_centiment_road(gym=gym, sim=sim, env=env, i=i,
-                                     pos=(-5 + self._scene_offset_x, -4 + offset_y, 0.001),
-                                     apply_texture=True, scale=1.0)
-        else:
-            self.load_centiment_road(gym=gym, sim=sim, env=env, i=i,
-                                     pos=(4 + self._scene_offset_x + 1, -4 + offset_y, 0.001),
-                                     apply_texture=True, scale=1.0)
-
-        # Big Snow Rocks
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(12 + offset_x, -0.5 + offset_y, 0.1),
-                              rot=(0, 0, 1, 0), apply_texture=False, scale=0.25)
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(14 + offset_x, offset_y, 0.1),
-                              rot=(0.3, 0.2, 0.1, 1), apply_texture=False, scale=0.3)
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(17 + offset_x, -1 + offset_y, 0.1),
-                              rot=(0.2, 0.1, 0.8, 0), apply_texture=False, scale=0.35)
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(10 + offset_x, offset_y, 0.1), rot=(0., 0., 1., 0.),
-                              apply_texture=False, scale=0.4)
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(18 + offset_x, -8 + offset_y, 0.1), rot=(0, 0, 0, 1),
-                              apply_texture=False, scale=0.4)
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(10 + offset_x, -7 + offset_y, 0.3),
-                              rot=(0.2, 0, 0.8, 0), apply_texture=False, scale=0.3)
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(13 + offset_x, -8.5 + offset_y, 0.1),
-                              rot=(0.2, 0, 0.8, 0), apply_texture=False, scale=0.55)
-        # self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(9 + offset_x, -8 + offset_y, 0.1),
-        #                       rot=(0.2, 0, 0.8, 0), apply_texture=False, scale=0.4)
-        # self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(9 + offset_x, -4 + offset_y, 0.1),
-        #                       rot=(0.2, 0, 0.8, 0), apply_texture=False, scale=0.35)
-        self.load_stone_asset(gym=gym, sim=sim, env=env, i=i, pos=(10 + offset_x, -3 + offset_y, 0.1),
-                              rot=(0.2, 0, 0.8, 0), apply_texture=False, scale=0.25)
-
-        # Set up random stones
-        self.load_random_snowstones_in_a_region(gym=gym, sim=sim, env=env, i=i, stone_nums=450, reverse=reverse)
-        self.load_random_sandstones_in_a_region(gym=gym, sim=sim, env=env, i=i, stone_nums=150, reverse=reverse)
-
-        # Christmas Tree
-        # initial_pose1 = gymapi.Transform()
-        # initial_pose2 = gymapi.Transform()
-        # initial_pose1.p = gymapi.Vec3(6.0 + offset_x, -2.0 + offset_y, 0.)
-        # initial_pose2.p = gymapi.Vec3(6.0 + offset_x, -6.0 + offset_y, 0.)
-        # asset3 = gym.load_asset(sim, f"{asset_root}/data", "tree/tree.urdf", asset_options)
-        # env = gym.create_env(sim, env_lower, env_upper, envs_per_row)
-        # actor3 = gym.create_actor(env, asset3, initial_pose1, 'actor_tree1', 0, 1)
-        # env = gym.create_env(sim, env_lower, env_upper, envs_per_row)
-        # actor4 = gym.create_actor(env, asset3, initial_pose2, 'actor_tree2', 1, 1)
-
-        texture_handle = gym.create_texture_from_file(sim, "meshes/quad_gym/env/assets/grass.png")
-
-        # Apply texture to Box Actor
-        # gym.set_rigid_body_texture(env, actor2, 0, gymapi.MESH_VISUAL, texture_handle)
-
-        # for _ in range(5):
-        #     gym.simulate(sim)
-        #     gym.refresh_dof_state_tensor(sim)
-        #     gym.refresh_actor_root_state_tensor(sim)
-        #     gym.refresh_net_contact_force_tensor(sim)
-        #     gym.refresh_rigid_body_state_tensor(sim)
-        #     gym.refresh_dof_force_tensor(sim)
-        #     gym.refresh_jacobian_tensors(sim)
-
-    def add_uneven_terrains(self, gym, sim, reverse=False):
-
-        # terrains
-        num_terrains = 1
-        terrain_width = 12.
-        terrain_length = 12.
-        horizontal_scale = 0.1  # [m] resolution in x
-        vertical_scale = 0.01  # [m] resolution in z
-        num_rows = int(terrain_width / horizontal_scale)
-        num_cols = int(terrain_length / horizontal_scale)
-        heightfield = np.zeros((num_terrains * num_rows, num_cols), dtype=np.int16)
-
-        def new_sub_terrain():
-            return SubTerrain(width=num_rows, length=num_cols, vertical_scale=vertical_scale,
-                              horizontal_scale=horizontal_scale)
-
-        # Pit height and width
-        # pit_depth = [0.1, 0.1]
-        # from isaacgym import terrain_utils
-        # terrain = terrain_utils.SubTerrain()
-        # terrain.height_field_raw[:] = -round(np.random.uniform(pit_depth[0], pit_depth[1]) / terrain.vertical_scale)
-
-        # np.random.seed(42)  # works for vel 0.3 m/s
-        np.random.seed(3)  # works for all vel
-        heightfield[0:1 * num_rows, :] = random_uniform_terrain(new_sub_terrain(), min_height=-0.01, max_height=0.01,
-                                                                step=0.05, downsampled_scale=0.1).height_field_raw
-        # heightfield[1 * num_rows:2 * num_rows, :] = sloped_terrain(new_sub_terrain(), slope=-0.5).height_field_raw
-        # heightfield[2 * num_rows:3 * num_rows, :] = stairs_terrain(new_sub_terrain(), step_width=0.75,
-        #                                                            step_height=-0.35).height_field_raw
-        # heightfield[2 * num_rows:3 * num_rows, :] = heightfield[2 * num_rows:3 * num_rows, :][::-1]
-        # heightfield[3 * num_rows:4 * num_rows, :] = pyramid_stairs_terrain(new_sub_terrain(), step_width=0.75,
-        #                                                                    step_height=-0.5).height_field_raw
-
-        # add the terrain as a triangle mesh
-        vertices, triangles = convert_heightfield_to_trimesh(heightfield, horizontal_scale=horizontal_scale,
-                                                             vertical_scale=vertical_scale, slope_threshold=1.5)
-        tm_params = gymapi.TriangleMeshParams()
-        tm_params.nb_vertices = vertices.shape[0]
-        tm_params.nb_triangles = triangles.shape[0]
-        if reverse:
-            tm_params.transform.p.x = -19.8 + self._scene_offset_x
-        else:
-            tm_params.transform.p.x = 8. + self._scene_offset_x
-        tm_params.transform.p.y = -terrain_width / 2 - 1. + 1
-        gym.add_triangle_mesh(sim, vertices.flatten(), triangles.flatten(), tm_params)
-
-        # vertices, triangles = convert_heightfield_to_trimesh(terrain.height_field_raw,
-        #                                                      horizontal_scale=horizontal_scale,
-        #                                                      vertical_scale=vertical_scale, slope_threshold=1.5)
-        # gym.add_triangle_mesh(sim, vertices.flatten(), triangles.flatten(), tm_params)
-
     def _init_buffers(self):
         # get gym GPU state tensors
         actor_root_state = self._gym.acquire_actor_root_state_tensor(self._sim)
-
         dof_state_tensor = self._gym.acquire_dof_state_tensor(self._sim)
         net_contact_forces = self._gym.acquire_net_contact_force_tensor(self._sim)
         rigid_body_state = self._gym.acquire_rigid_body_state_tensor(self._sim)
         dof_force = self._gym.acquire_dof_force_tensor(self._sim)
-        jacobians = self._gym.acquire_jacobian_tensor(self._sim, "actor")
+        jacobians = self._gym.acquire_jacobian_tensor(self._sim, "robot")
         # print(f"jacobian: {gymtorch.wrap_tensor(jacobians)}")
 
-        self._gym.refresh_dof_state_tensor(self._sim)
+        # Obtain global robot indices
+        for i in range(len(self._envs)):
+            index = self._gym.get_actor_index(self._envs[i], self._robot_actors[i], gymapi.DOMAIN_SIM)
+            self._robot_actors_global_indices.append(index)
+
+            idx1 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[0],
+                                                        gymapi.DOMAIN_SIM)
+            idx2 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[1],
+                                                        gymapi.DOMAIN_SIM)
+            idx3 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[2],
+                                                        gymapi.DOMAIN_SIM)
+            idx4 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[3],
+                                                        gymapi.DOMAIN_SIM)
+            print(f"idx1: {idx1}")
+            print(f"idx2: {idx2}")
+            print(f"idx3: {idx3}")
+            print(f"idx4: {idx4}")
+
+            rigid_body_dict = self._gym.get_actor_rigid_body_dict(self._envs[i], self._robot_actors[i])
+            print(f"rigid_body_dict: {rigid_body_dict}")
+            for v in sorted(rigid_body_dict.values()):
+                idx = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], v, gymapi.DOMAIN_SIM)
+                self._robot_rigid_body_global_indices.append(idx)
+
+        # Wrap all tensors
+        actor_root_state = gymtorch.wrap_tensor(actor_root_state)
+        # actor_root_state_robot = gymtorch.wrap_tensor(actor_root_state_robot)
+        dof_state_tensor = gymtorch.wrap_tensor(dof_state_tensor)
+        # net_contact_forces = gymtorch.wrap_tensor(net_contact_forces)
+        # rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
+        net_contact_forces = gymtorch.wrap_tensor(net_contact_forces)
+        rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
+        dof_force = gymtorch.wrap_tensor(dof_force)
+        jacobians = gymtorch.wrap_tensor(jacobians)
+
+        # res = self._gym.get_actor_rigid_body_states(self._envs[i], self._robot_actors[i], gymapi.STATE_ALL)
+        # print(f"res: {res}")
+        # rigid_body_state.append(res)
+        # rigid_body_state = rigid_body_state.reshape(-1, 3)
+        # print(f"rigid_body_state: {to_torch(rigid_body_state, device=self._device).shape}")
+        print(f"self._robot_rigid_body_global_indices: {self._robot_rigid_body_global_indices}")
+        print(f"actor_root_state: {actor_root_state}")
+        print(f"actor_root_state.shape: {actor_root_state.shape}")
+        print(f"actor_root_state.type: {type(actor_root_state)}")
+        print(f"dof_state_tensor: {dof_state_tensor.shape}")
+        print(f"net_contact_forces: {net_contact_forces}")
+        print(f"net_contact_forces: {net_contact_forces.shape}")
+        print(f"rigid_body_state: {rigid_body_state}")
+        print(f"rigid_body_state: {rigid_body_state.shape}")
+        print(f"rigid_body_state: {rigid_body_state.dtype}")
+        print(f"dof_force: {dof_force.shape}")
+        print(f"jacobians: {jacobians.shape}")
+        # time.sleep(123)
+
         self._gym.refresh_actor_root_state_tensor(self._sim)
         self._gym.refresh_net_contact_force_tensor(self._sim)
+        self._gym.refresh_rigid_body_state_tensor(self._sim)
+        self._gym.refresh_dof_force_tensor(self._sim)
+        self._gym.refresh_dof_state_tensor(self._sim)
+        self._gym.refresh_jacobian_tensors(self._sim)
 
         # Robot state buffers
-        self._root_states = gymtorch.wrap_tensor(actor_root_state)
+        self._all_root_states = actor_root_state.clone()
+        self._all_root_states[self._robot_actors_global_indices] = self._base_init_state
+        self._root_states = actor_root_state[self._robot_actors_global_indices]
         print(f"self._root_states: {self._root_states}")
 
-        self._dof_state = gymtorch.wrap_tensor(dof_state_tensor)
-        self._rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[:self._num_envs * self._num_bodies, :]
+        self._dof_state = dof_state_tensor
+        self._rigid_body_state = rigid_body_state[:self._num_envs * self._num_rigid_body_per_env, :]
         self._motor_positions = self._dof_state.view(self._num_envs, self._num_dof, 2)[..., 0]
         self._motor_velocities = self._dof_state.view(self._num_envs, self._num_dof, 2)[..., 1]
         self._base_quat = self._root_states[:self._num_envs, 3:7]
@@ -641,82 +331,33 @@ class Robot:
         self._base_rot_mat_t = torch.transpose(self._base_rot_mat, 1, 2)
         # print(f"self._base_rot_mat_t: {self._base_rot_mat_t}")
 
-        self._contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(
-            self._num_envs, -1, 3)  # shape: num_envs, num_bodies, xyz axis
-        self._motor_torques = gymtorch.wrap_tensor(dof_force).view(self._num_envs, self._num_dof)
-        self._jacobian = gymtorch.wrap_tensor(jacobians)
+        self._contact_forces = (net_contact_forces.view(self._num_envs, -1, 3))  # shape: num_envs, num_bodies, xyz axis
+        self._motor_torques = dof_force.view(self._num_envs, self._num_dof)
+        self._jacobian = jacobians
         self._base_lin_vel_world = self._root_states[:self._num_envs, 7:10]
         self._base_ang_vel_world = self._root_states[:self._num_envs, 10:13]
         self._gravity_vec = torch.stack([to_torch([0., 0., 1.], device=self._device)] * self._num_envs)
         self._projected_gravity = torch.bmm(self._base_rot_mat_t, self._gravity_vec[:, :, None])[:, :, 0]
-        self._foot_velocities = self._rigid_body_state.view(
-            self._num_envs, self._num_bodies, 13)[:, self._feet_indices, 7:10]
+        self._foot_velocities = self._rigid_body_state.view(self._num_envs,
+                                                            self._num_rigid_body_per_env, 13)[:, self._feet_indices, 7:10]
         self._foot_positions = self._rigid_body_state.view(self._num_envs,
-                                                           self._num_bodies,
-                                                           13)[:,
-                               self._feet_indices,
-                               0:3]
-        # Other useful buffers
-        self._torques = torch.zeros(self._num_envs,
-                                    self._num_dof,
-                                    dtype=torch.float,
-                                    device=self._device,
-                                    requires_grad=False)
+                                                           self._num_rigid_body_per_env, 13)[:, self._feet_indices, 0:3]
+        print(f"self._base_quat: {self._base_quat}")
+        print(f"self._base_rot_mat: {self._base_rot_mat}")
+        print(f"self._base_lin_vel_world: {self._base_lin_vel_world}")
+        print(f"self._base_ang_vel_world: {self._base_ang_vel_world}")
 
-    def _init_solo_go2_buffers(self):
-        # get gym GPU state tensors
-        actor_root_state = self._gym.acquire_actor_root_state_tensor(self._sim)
-
-        dof_state_tensor = self._gym.acquire_dof_state_tensor(self._sim)
-        net_contact_forces = self._gym.acquire_net_contact_force_tensor(self._sim)
-        rigid_body_state = self._gym.acquire_rigid_body_state_tensor(self._sim)
-        dof_force = self._gym.acquire_dof_force_tensor(self._sim)
-        jacobians = self._gym.acquire_jacobian_tensor(self._sim, "actor")
-        # print(f"jacobian: {gymtorch.wrap_tensor(jacobians)}")
-
-        self._gym.refresh_dof_state_tensor(self._sim)
-        self._gym.refresh_actor_root_state_tensor(self._sim)
-        self._gym.refresh_net_contact_force_tensor(self._sim)
-
-        # Robot state buffers
-        self._root_states = gymtorch.wrap_tensor(actor_root_state)
-        self._dof_state = gymtorch.wrap_tensor(dof_state_tensor)
-        self._rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[:self._num_envs * self._num_bodies, :]
-
-        # print(f"origin: {self._root_states}")
-        # print(f"origin: {self._root_states[0]}")
-        # print(f"self._dof_state pre: {self._dof_state}")
-        # self._root_states = self._root_states[0].unsqueeze(dim=0)
-        # self._dof_state = self._dof_state[0]
-        # print(f"self._rigid_body_state pre: {self._rigid_body_state}")
-        # self._rigid_body_state = self._rigid_body_state[0].unsqueeze(dim=0)
-        # print(f"self._rigid_body_state: {self._rigid_body_state}")
-        # print(f"self._dof_state: {self._dof_state}")
-
-        self._motor_positions = self._dof_state.view(self._num_envs, self._num_dof, 2)[..., 0]
-        self._motor_velocities = self._dof_state.view(self._num_envs, self._num_dof, 2)[..., 1]
-        self._base_quat = self._root_states[:self._num_envs, 3:7]
-        self._base_rot_mat = quat_to_rot_mat(self._base_quat)
-        self._base_rot_mat_t = torch.transpose(self._base_rot_mat, 1, 2)
-
-        # print(f"self._root_states: {self._root_states[0, :]}")
-        # print(f"self._base_rot_mat_t: {self._base_rot_mat_t}")
-
-        self._contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(
-            self._num_envs, -1, 3)  # shape: num_envs, num_bodies, xyz axis
-        self._motor_torques = gymtorch.wrap_tensor(dof_force).view(self._num_envs, self._num_dof)
-        self._jacobian = gymtorch.wrap_tensor(jacobians)
-        self._base_lin_vel_world = self._root_states[:self._num_envs, 7:10]
-        self._base_ang_vel_world = self._root_states[:self._num_envs, 10:13]
-        self._gravity_vec = torch.stack([to_torch([0., 0., 1.], device=self._device)] * self._num_envs)
-        self._projected_gravity = torch.bmm(self._base_rot_mat_t, self._gravity_vec[:, :, None])[:, :, 0]
-        self._foot_velocities = self._rigid_body_state.view(
-            self._num_envs, self._num_bodies, 13)[:, self._feet_indices, 7:10]
-        self._foot_positions = self._rigid_body_state.view(self._num_envs,
-                                                           self._num_bodies,
-                                                           13)[:,
-                               self._feet_indices,
-                               0:3]
+        print(f"self._num_bodies: {self._num_bodies}")
+        # print(f"rigid_body_view: {self._rigid_body_state.view(self._num_envs, self._num_bodies, 13)}")
+        print(f"self._rigid_body_state: {self._rigid_body_state}")
+        print(f"self._feet_indices: {self._feet_indices}")
+        print(f"self._foot_positions: {self._foot_positions}")
+        print(f"self._foot_velocities: {self._foot_velocities}")
+        print(f"self._rigid_body_state: {self._rigid_body_state.shape}")
+        print(f"self._feet_indices: {self._feet_indices.shape}")
+        print(f"self._foot_positions: {self._foot_positions.shape}")
+        print(f"self._foot_velocities: {self._foot_velocities.shape}")
+        # time.sleep(123)
         # Other useful buffers
         self._torques = torch.zeros(self._num_envs,
                                     self._num_dof,
@@ -736,12 +377,17 @@ class Robot:
         self._time_since_reset[env_ids] = 0
 
         # Reset root states:
-        self._root_states[env_ids] = self._base_init_state[env_ids]
-
-        self._gym.set_actor_root_state_tensor_indexed(
-            self._sim, gymtorch.unwrap_tensor(self._root_states),
-            gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32)
+        # all_root_state = self._all_root_states
+        # self._root_states[env_ids] = self._base_init_state[env_ids]
+        # print(f"self._root_states: {self._root_states}")
+        # print(f"env_ids: {env_ids}")
+        self._gym.set_actor_root_state_tensor(
+            self._sim, gymtorch.unwrap_tensor(self._all_root_states)
         )
+        # self._gym.set_actor_root_state_tensor_indexed(
+        #     self._sim, gymtorch.unwrap_tensor(self._root_states),
+        #     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32)
+        # )
         # Reset dofs
         self._motor_positions[env_ids] = to_torch(self._init_motor_angles,
                                                   device=self._device,
@@ -754,7 +400,6 @@ class Robot:
 
         if len(env_ids) == self._num_envs:
             self._gym.simulate(self._sim)
-        self._gym.refresh_dof_state_tensor(self._sim)
 
         self._post_physics_step()
         # time.sleep(123)
@@ -776,11 +421,24 @@ class Robot:
         self._post_physics_step()
 
     def _post_physics_step(self):
+        # Refresh all tensors
         self._gym.refresh_actor_root_state_tensor(self._sim)
         self._gym.refresh_net_contact_force_tensor(self._sim)
         self._gym.refresh_rigid_body_state_tensor(self._sim)
+        self._gym.refresh_dof_state_tensor(self._sim)
         self._gym.refresh_dof_force_tensor(self._sim)
         self._gym.refresh_jacobian_tensors(self._sim)
+
+        # Obtain and get the tensor to update
+        actor_root_state = self._gym.acquire_actor_root_state_tensor(self._sim)
+        rigid_body_state = self._gym.acquire_rigid_body_state_tensor(self._sim)
+        actor_root_state = gymtorch.wrap_tensor(actor_root_state)
+        rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
+
+        # Update robot actor root state and rigid_body_state
+        self._root_states = actor_root_state[self._robot_actors_global_indices]
+        # self._rigid_body_state = rigid_body_state
+
         self._base_quat[:] = self._root_states[:self._num_envs, 3:7]
         self._base_rot_mat = quat_to_rot_mat(self._base_quat)
         self._base_rot_mat_t = torch.transpose(self._base_rot_mat, 1, 2)
@@ -791,11 +449,16 @@ class Robot:
         self._base_ang_vel_world = self._root_states[:self._num_envs, 10:13]
         self._projected_gravity[:] = torch.bmm(self._base_rot_mat_t,
                                                self._gravity_vec[:, :, None])[:, :, 0]
-        self._foot_velocities = self._rigid_body_state.view(
-            self._num_envs, self._num_bodies, 13)[:, self._feet_indices, 7:10]
+        self._foot_velocities = self._rigid_body_state.view(self._num_envs,
+                                                            self._num_rigid_body_per_env, 13)[:, self._feet_indices, 7:10]
         self._foot_positions = self._rigid_body_state.view(self._num_envs,
-                                                           self._num_bodies,
-                                                           13)[:, self._feet_indices, 0:3]
+                                                           self._num_rigid_body_per_env, 13)[:, self._feet_indices, 0:3]
+        print("*******************************************************************************")
+        print(f"actor_root_state: {self._root_states}")
+        print(f"self._foot_positions: {self._foot_positions}")
+        print(f"self._foot_velocities: {self._foot_velocities}")
+        print("*******************************************************************************")
+
         # print(f"foot_positions: {self._foot_positions}")
         # _foot_pos = torch.zeros_like(self._foot_positions)
         # _foot_pos[:, 0] = torch.clone(self._foot_positions[:, 1])
@@ -805,6 +468,284 @@ class Robot:
         # self._foot_positions = _foot_pos
         # print(f"foot_positions changed: {self._foot_positions}")
         # time.sleep(123)
+
+    def get_motor_angles_from_foot_positions(self, foot_local_positions):
+        raise NotImplementedError()
+
+    def update_init_positions(self, env_ids, init_positions):
+        self._base_init_state[env_ids] = self._compute_base_init_state(
+            init_positions)
+
+    @property
+    def base_position(self):
+        base_position = torch.clone(self._root_states[:self._num_envs, :3])
+        return base_position
+
+    @property
+    def base_position_world(self):
+        return self._root_states[:self._num_envs, :3]
+
+    @property
+    def base_orientation_rpy(self):
+        return angle_normalize(
+            get_euler_xyz_from_quaternion(self._root_states[:self._num_envs, 3:7]))
+
+    @property
+    def base_orientation_quat(self):
+        return self._root_states[:self._num_envs, 3:7]
+
+    @property
+    def projected_gravity(self):
+        return self._projected_gravity
+
+    @property
+    def base_rot_mat(self):
+        return self._base_rot_mat
+
+    @property
+    def base_rot_mat_t(self):
+        return self._base_rot_mat_t
+
+    @property
+    def base_velocity_world_frame(self):
+        return self._base_lin_vel_world
+
+    @property
+    def base_velocity_body_frame(self):
+        # print(f"self._root_states: {self._root_states}")
+        # print(f"self._base_rot_mat_t: {self._base_rot_mat_t}")
+        # print(f"res: {torch.bmm(self._base_rot_mat_t, self._root_states[:, 7:10, None])[:, :, 0]}")
+        return torch.bmm(self._base_rot_mat_t, self._root_states[:self._num_envs, 7:10,
+                                               None])[:, :, 0]
+
+    @property
+    def base_angular_velocity_world_frame(self):
+        return self._base_ang_vel_world
+
+    @property
+    def base_angular_velocity_body_frame(self):
+        return torch.bmm(self._base_rot_mat_t, self._root_states[:self._num_envs, 10:13,
+                                               None])[:, :, 0]
+
+    @property
+    def motor_positions(self):
+        return torch.clone(self._motor_positions)
+
+    @property
+    def motor_velocities(self):
+        return torch.clone(self._motor_velocities)
+
+    @property
+    def motor_torques(self):
+        return torch.clone(self._torques)
+
+    @property
+    def foot_positions_in_base_frame(self):
+        foot_positions_world_frame = self._foot_positions
+        base_position_world_frame = self._root_states[:self._num_envs, :3]
+        # num_env x 4 x 3
+        foot_position = (foot_positions_world_frame -
+                         base_position_world_frame[:, None, :])
+        # return torch.matmul(self._base_rot_mat_t,
+        #                     foot_position.transpose(1, 2)).transpose(1, 2)
+        res = torch.matmul(self._base_rot_mat_t,
+                           foot_position.transpose(1, 2)).transpose(1, 2)
+        # print(f"res: {res}")
+        return res
+
+    @property
+    def foot_positions_in_world_frame(self):
+        return torch.clone(self._foot_positions)
+
+    @property
+    def foot_height(self):
+        return self._foot_positions[:, :, 2]
+
+    @property
+    def foot_velocities_in_base_frame(self):
+        foot_vels = torch.bmm(self.all_foot_jacobian,
+                              self.motor_velocities[:, :, None]).squeeze()
+        return foot_vels.reshape((self._num_envs, 4, 3))
+
+    @property
+    def foot_velocities_in_world_frame(self):
+        return self._foot_velocities
+
+    @property
+    def foot_contacts(self):
+        return self._contact_forces[:, self._feet_indices, 2] > 1.
+
+    @property
+    def foot_contact_forces(self):
+        return self._contact_forces[:, self._feet_indices, :]
+
+    @property
+    def calf_contacts(self):
+        return self._contact_forces[:, self._calf_indices, 2] > 1.
+
+    @property
+    def calf_contact_forces(self):
+        return self._contact_forces[:, self._calf_indices, :]
+
+    @property
+    def thigh_contacts(self):
+        return self._contact_forces[:, self._thigh_indices, 2] > 1.
+
+    @property
+    def thigh_contact_forces(self):
+        return self._contact_forces[:, self._thigh_indices, :]
+
+    @property
+    def has_body_contact(self):
+        return torch.any(torch.norm(self._contact_forces[:, self._body_indices, :],
+                                    dim=-1) > 1.,
+                         dim=1)
+
+    @property
+    def hip_positions_in_body_frame(self):
+        raise NotImplementedError()
+
+    @property
+    def all_foot_jacobian(self):
+        rot_mat_t = self.base_rot_mat_t
+        # print(f"rot_mat_t: {rot_mat_t}")
+        # print(f"self._jacobian: {self._jacobian}")
+        # print(f"self._jacobian: {self._jacobian.shape}")
+        # time.sleep(123)
+        jacobian = torch.zeros((self._num_envs, 12, 12), device=self._device)
+        jacobian[:, :3, :3] = torch.bmm(rot_mat_t, self._jacobian[:, 4, :3, 6:9])
+        jacobian[:, 3:6, 3:6] = torch.bmm(rot_mat_t, self._jacobian[:, 8, :3, 9:12])
+        jacobian[:, 6:9, 6:9] = torch.bmm(rot_mat_t, self._jacobian[:, 12, :3, 12:15])
+        jacobian[:, 9:12, 9:12] = torch.bmm(rot_mat_t, self._jacobian[:, 16, :3, 15:18])
+        return jacobian
+
+    @property
+    def motor_group(self):
+        return self._motors
+
+    @property
+    def num_envs(self):
+        return self._num_envs
+
+    @property
+    def num_dof(self):
+        return self._num_dof
+
+    @property
+    def device(self):
+        return self._device
+
+    @property
+    def time_since_reset(self):
+        return torch.clone(self._time_since_reset)
+
+    @property
+    def control_timestep(self):
+        return self._sim_config.dt * self._sim_config.action_repeat
+
+    def get_pcd(self):
+
+        # Array of RGB Colors, one per camera, for dots in the resulting
+        # point cloud. Points will have a color which indicates which camera's
+        # depth image created the point.
+        color_map = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 1], [1, 0, 1]])
+
+        # Render all of the image sensors only when we need their output here
+        # rather than every frame.
+        self._gym.render_all_camera_sensors(self._sim)
+        color_map = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 1], [1, 0, 1]])
+        points = []
+        color = []
+        print("Converting Depth images to point clouds. Have patience...")
+
+        # print("Deprojecting from camera %d" % c)
+        # Retrieve depth and segmentation buffer
+        rgba_buffer = self._gym.get_camera_image(self._sim, self._envs[0], self._camera_handle, gymapi.IMAGE_COLOR)
+        depth_buffer = self._gym.get_camera_image(self._sim, self._envs[0], self._camera_handle, gymapi.IMAGE_DEPTH)
+        seg_buffer = self._gym.get_camera_image(self._sim, self._envs[0], self._camera_handle,
+                                                gymapi.IMAGE_SEGMENTATION)
+
+        # Get the camera view matrix and invert it to transform points from camera to world
+        # space
+        vinv = np.linalg.inv(np.matrix(self._gym.get_camera_view_matrix(self._sim, self._envs[0], self._camera_handle)))
+
+        # Get the camera projection matrix and get the necessary scaling
+        # coefficients for deprojection
+        proj = self._gym.get_camera_proj_matrix(self._sim, self._envs[0], self._camera_handle)
+        fu = 2 / proj[0, 0]
+        fv = 2 / proj[1, 1]
+
+        # Ignore any points which originate from ground plane or empty space
+        # depth_buffer[seg_buffer == 0] = -10001
+        cam_width = 1920
+        cam_height = 1080
+        centerU = cam_width / 2
+        centerV = cam_height / 2
+        for i in range(cam_width):
+            for j in range(cam_height):
+                # if depth_buffer[j, i] < -10000:
+                #     continue
+                # if seg_buffer[j, i] > 0:
+                u = -(i - centerU) / (cam_width)  # image-space coordinate
+                v = (j - centerV) / (cam_height)  # image-space coordinate
+                d = depth_buffer[j, i]  # depth buffer value
+                X2 = [d * fu * u, d * fv * v, d, 1]  # deprojection vector
+                p2 = X2 * vinv  # Inverse camera view to get world coordinates
+                points.append([p2[0, 2], p2[0, 0], p2[0, 1]])
+                # color.append(c)
+
+        # # use pptk to visualize the 3d point cloud created above
+        # v = pptk.viewer(points, color)
+        # v.color_map(color_map)
+        # # Sets a similar view to the gym viewer in the PPTK viewer
+        # v.set(lookat=[0, 0, 0], r=5, theta=0.4, phi=0.707)
+        # print("Point Cloud Complete")
+        # print(f"point: {points}")
+        # print(f"point: {points.shape}")
+        import open3d as o3d
+
+        # Convert points and color to numpy arrays
+        points = np.array(points)
+        np.save("new_pcld", points)
+        # print(f"points: {points}")
+        # print(f"points: {points.shape}")
+        # colors = np.array([color_map[c] for c in color])
+        # colors = rgba_buffer[]
+        rgba_image = np.frombuffer(rgba_buffer, dtype=np.uint8).reshape(1080, 1920, 4)
+        rgb_image = rgba_image[:, :, :3]
+        # colors = rgb_image.reshape(-1, *rgb_image[2:])
+
+        # print(f"colors: {colors}")
+        # print(f"colors: {colors.shape}")
+
+        # Create Open3D PointCloud object
+        point_cloud = o3d.geometry.PointCloud()
+        point_cloud.points = o3d.utility.Vector3dVector(points)
+        # point_cloud.colors = o3d.utility.Vector3dVector(colors)
+        # o3d.io.write_point_cloud("output1.ply", point_cloud, write_ascii=True)
+
+        print("Point cloud saved to 'output.ply'")
+        # Visualize the point cloud
+        # o3d.visualization.draw_geometries([point_cloud],
+        #                                   zoom=0.8,
+        #                                   front=[0.0, 0.0, -1.0],
+        #                                   lookat=[0.0, 0.0, 0.0],
+        #                                   up=[0.0, -1.0, 0.0])
+        # print("Point Cloud Visualization Complete")
+        # pcd_points = np.load("pcld_right.npy")
+        # bev_img = birds_eye_point_cloud(pcd_points)
+        # print("loaded!!!!")
+        # time.sleep(123)
+        # if show_plot:
+        #     axarr[0, 0].imshow(rgb)
+        #     axarr[0, 1].imshow(realDepthImg)
+        #     axarr[1, 0].imshow(seg)
+        #     axarr[1, 1].imshow(bev_img)
+        #     plt.pause(0.1)
+
+        # label_save_folder = '.'
+        # bev_save_path = os.path.join(label_save_folder, f"bev_.png")
+        # plt.imsave(bev_save_path, bev_img)
 
     def render(self, sync_frame_time=True):
         if self._viewer:
@@ -1189,7 +1130,7 @@ class Robot:
         local_transform = gymapi.Transform()
         local_transform.p = gymapi.Vec3(*camera_pos)
         local_transform.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.radians(30.0))
-        self._gym.attach_camera_to_body(camera_handle, self._envs[0], self._actors[0], local_transform,
+        self._gym.attach_camera_to_body(camera_handle, self._envs[0], self._robot_actors[0], local_transform,
                                         gymapi.FOLLOW_TRANSFORM)
 
         return camera_handle
@@ -1221,281 +1162,3 @@ class Robot:
                 transform,
             )
         return camera_handle
-
-    def get_motor_angles_from_foot_positions(self, foot_local_positions):
-        raise NotImplementedError()
-
-    def update_init_positions(self, env_ids, init_positions):
-        self._base_init_state[env_ids] = self._compute_base_init_state(
-            init_positions)
-
-    @property
-    def base_position(self):
-        base_position = torch.clone(self._root_states[:self._num_envs, :3])
-        return base_position
-
-    @property
-    def base_position_world(self):
-        return self._root_states[:self._num_envs, :3]
-
-    @property
-    def base_orientation_rpy(self):
-        return angle_normalize(
-            get_euler_xyz_from_quaternion(self._root_states[:self._num_envs, 3:7]))
-
-    @property
-    def base_orientation_quat(self):
-        return self._root_states[:self._num_envs, 3:7]
-
-    @property
-    def projected_gravity(self):
-        return self._projected_gravity
-
-    @property
-    def base_rot_mat(self):
-        return self._base_rot_mat
-
-    @property
-    def base_rot_mat_t(self):
-        return self._base_rot_mat_t
-
-    @property
-    def base_velocity_world_frame(self):
-        return self._base_lin_vel_world
-
-    @property
-    def base_velocity_body_frame(self):
-        # print(f"self._root_states: {self._root_states}")
-        # print(f"self._base_rot_mat_t: {self._base_rot_mat_t}")
-        # print(f"res: {torch.bmm(self._base_rot_mat_t, self._root_states[:, 7:10, None])[:, :, 0]}")
-        return torch.bmm(self._base_rot_mat_t, self._root_states[:self._num_envs, 7:10,
-                                               None])[:, :, 0]
-
-    @property
-    def base_angular_velocity_world_frame(self):
-        return self._base_ang_vel_world
-
-    @property
-    def base_angular_velocity_body_frame(self):
-        return torch.bmm(self._base_rot_mat_t, self._root_states[:self._num_envs, 10:13,
-                                               None])[:, :, 0]
-
-    @property
-    def motor_positions(self):
-        return torch.clone(self._motor_positions)
-
-    @property
-    def motor_velocities(self):
-        return torch.clone(self._motor_velocities)
-
-    @property
-    def motor_torques(self):
-        return torch.clone(self._torques)
-
-    @property
-    def foot_positions_in_base_frame(self):
-        foot_positions_world_frame = self._foot_positions
-        base_position_world_frame = self._root_states[:self._num_envs, :3]
-        # num_env x 4 x 3
-        foot_position = (foot_positions_world_frame -
-                         base_position_world_frame[:, None, :])
-        # return torch.matmul(self._base_rot_mat_t,
-        #                     foot_position.transpose(1, 2)).transpose(1, 2)
-        res = torch.matmul(self._base_rot_mat_t,
-                           foot_position.transpose(1, 2)).transpose(1, 2)
-        # print(f"res: {res}")
-        return res
-
-    @property
-    def foot_positions_in_world_frame(self):
-        return torch.clone(self._foot_positions)
-
-    @property
-    def foot_height(self):
-        return self._foot_positions[:, :, 2]
-
-    @property
-    def foot_velocities_in_base_frame(self):
-        foot_vels = torch.bmm(self.all_foot_jacobian,
-                              self.motor_velocities[:, :, None]).squeeze()
-        return foot_vels.reshape((self._num_envs, 4, 3))
-
-    @property
-    def foot_velocities_in_world_frame(self):
-        return self._foot_velocities
-
-    @property
-    def foot_contacts(self):
-        return self._contact_forces[:, self._feet_indices, 2] > 1.
-
-    @property
-    def foot_contact_forces(self):
-        return self._contact_forces[:, self._feet_indices, :]
-
-    @property
-    def calf_contacts(self):
-        return self._contact_forces[:, self._calf_indices, 2] > 1.
-
-    @property
-    def calf_contact_forces(self):
-        return self._contact_forces[:, self._calf_indices, :]
-
-    @property
-    def thigh_contacts(self):
-        return self._contact_forces[:, self._thigh_indices, 2] > 1.
-
-    @property
-    def thigh_contact_forces(self):
-        return self._contact_forces[:, self._thigh_indices, :]
-
-    @property
-    def has_body_contact(self):
-        return torch.any(torch.norm(self._contact_forces[:, self._body_indices, :],
-                                    dim=-1) > 1.,
-                         dim=1)
-
-    @property
-    def hip_positions_in_body_frame(self):
-        raise NotImplementedError()
-
-    @property
-    def all_foot_jacobian(self):
-        rot_mat_t = self.base_rot_mat_t
-        # print(f"rot_mat_t: {rot_mat_t}")
-        # print(f"self._jacobian: {self._jacobian}")
-        # print(f"self._jacobian: {self._jacobian.shape}")
-        # time.sleep(123)
-        jacobian = torch.zeros((self._num_envs, 12, 12), device=self._device)
-        jacobian[:, :3, :3] = torch.bmm(rot_mat_t, self._jacobian[:, 4, :3, 6:9])
-        jacobian[:, 3:6, 3:6] = torch.bmm(rot_mat_t, self._jacobian[:, 8, :3, 9:12])
-        jacobian[:, 6:9, 6:9] = torch.bmm(rot_mat_t, self._jacobian[:, 12, :3, 12:15])
-        jacobian[:, 9:12, 9:12] = torch.bmm(rot_mat_t, self._jacobian[:, 16, :3, 15:18])
-        return jacobian
-
-    @property
-    def motor_group(self):
-        return self._motors
-
-    @property
-    def num_envs(self):
-        return self._num_envs
-
-    @property
-    def num_dof(self):
-        return self._num_dof
-
-    @property
-    def device(self):
-        return self._device
-
-    @property
-    def time_since_reset(self):
-        return torch.clone(self._time_since_reset)
-
-    @property
-    def control_timestep(self):
-        return self._sim_config.dt * self._sim_config.action_repeat
-
-    def get_pcd(self):
-
-        # Array of RGB Colors, one per camera, for dots in the resulting
-        # point cloud. Points will have a color which indicates which camera's
-        # depth image created the point.
-        color_map = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 1], [1, 0, 1]])
-
-        # Render all of the image sensors only when we need their output here
-        # rather than every frame.
-        self._gym.render_all_camera_sensors(self._sim)
-        color_map = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 1], [1, 0, 1]])
-        points = []
-        color = []
-        print("Converting Depth images to point clouds. Have patience...")
-
-        # print("Deprojecting from camera %d" % c)
-        # Retrieve depth and segmentation buffer
-        rgba_buffer = self._gym.get_camera_image(self._sim, self._envs[0], self._camera_handle, gymapi.IMAGE_COLOR)
-        depth_buffer = self._gym.get_camera_image(self._sim, self._envs[0], self._camera_handle, gymapi.IMAGE_DEPTH)
-        seg_buffer = self._gym.get_camera_image(self._sim, self._envs[0], self._camera_handle,
-                                                gymapi.IMAGE_SEGMENTATION)
-
-        # Get the camera view matrix and invert it to transform points from camera to world
-        # space
-        vinv = np.linalg.inv(np.matrix(self._gym.get_camera_view_matrix(self._sim, self._envs[0], self._camera_handle)))
-
-        # Get the camera projection matrix and get the necessary scaling
-        # coefficients for deprojection
-        proj = self._gym.get_camera_proj_matrix(self._sim, self._envs[0], self._camera_handle)
-        fu = 2 / proj[0, 0]
-        fv = 2 / proj[1, 1]
-
-        # Ignore any points which originate from ground plane or empty space
-        # depth_buffer[seg_buffer == 0] = -10001
-        cam_width = 1920
-        cam_height = 1080
-        centerU = cam_width / 2
-        centerV = cam_height / 2
-        for i in range(cam_width):
-            for j in range(cam_height):
-                # if depth_buffer[j, i] < -10000:
-                #     continue
-                # if seg_buffer[j, i] > 0:
-                u = -(i - centerU) / (cam_width)  # image-space coordinate
-                v = (j - centerV) / (cam_height)  # image-space coordinate
-                d = depth_buffer[j, i]  # depth buffer value
-                X2 = [d * fu * u, d * fv * v, d, 1]  # deprojection vector
-                p2 = X2 * vinv  # Inverse camera view to get world coordinates
-                points.append([p2[0, 2], p2[0, 0], p2[0, 1]])
-                # color.append(c)
-
-        # # use pptk to visualize the 3d point cloud created above
-        # v = pptk.viewer(points, color)
-        # v.color_map(color_map)
-        # # Sets a similar view to the gym viewer in the PPTK viewer
-        # v.set(lookat=[0, 0, 0], r=5, theta=0.4, phi=0.707)
-        # print("Point Cloud Complete")
-        # print(f"point: {points}")
-        # print(f"point: {points.shape}")
-        import open3d as o3d
-
-        # Convert points and color to numpy arrays
-        points = np.array(points)
-        np.save("new_pcld", points)
-        # print(f"points: {points}")
-        # print(f"points: {points.shape}")
-        # colors = np.array([color_map[c] for c in color])
-        # colors = rgba_buffer[]
-        rgba_image = np.frombuffer(rgba_buffer, dtype=np.uint8).reshape(1080, 1920, 4)
-        rgb_image = rgba_image[:, :, :3]
-        # colors = rgb_image.reshape(-1, *rgb_image[2:])
-
-        # print(f"colors: {colors}")
-        # print(f"colors: {colors.shape}")
-
-        # Create Open3D PointCloud object
-        point_cloud = o3d.geometry.PointCloud()
-        point_cloud.points = o3d.utility.Vector3dVector(points)
-        # point_cloud.colors = o3d.utility.Vector3dVector(colors)
-        # o3d.io.write_point_cloud("output1.ply", point_cloud, write_ascii=True)
-
-        print("Point cloud saved to 'output.ply'")
-        # Visualize the point cloud
-        # o3d.visualization.draw_geometries([point_cloud],
-        #                                   zoom=0.8,
-        #                                   front=[0.0, 0.0, -1.0],
-        #                                   lookat=[0.0, 0.0, 0.0],
-        #                                   up=[0.0, -1.0, 0.0])
-        # print("Point Cloud Visualization Complete")
-        # pcd_points = np.load("pcld_right.npy")
-        # bev_img = birds_eye_point_cloud(pcd_points)
-        # print("loaded!!!!")
-        # time.sleep(123)
-        # if show_plot:
-        #     axarr[0, 0].imshow(rgb)
-        #     axarr[0, 1].imshow(realDepthImg)
-        #     axarr[1, 0].imshow(seg)
-        #     axarr[1, 1].imshow(bev_img)
-        #     plt.pause(0.1)
-
-        # label_save_folder = '.'
-        # bev_save_path = os.path.join(label_save_folder, f"bev_.png")
-        # plt.imsave(bev_save_path, bev_img)

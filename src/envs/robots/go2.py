@@ -1,5 +1,5 @@
 """Vectorized Go2 robot in Isaac Gym."""
-from typing import Any, Sequence
+from typing import Any, Sequence, List
 
 from isaacgym.torch_utils import to_torch
 import ml_collections
@@ -48,7 +48,8 @@ class Go2(Robot):
             viewer: Any,
             sim_config: ml_collections.ConfigDict(),
             num_envs: int,
-            init_positions: _ARRAY,
+            world_env: Any,
+            init_positions: torch.Tensor,
             motor_control_mode: MotorControlMode,
             motor_torque_delay_steps: int = 0,
     ):
@@ -222,27 +223,19 @@ class Go2(Robot):
             device=sim_config.sim_device) + com_offset
 
         delta_x, delta_y = 0.0, 0.0
-        # hip_position_single = to_torch((
-        #     (0.1835 + delta_x, -0.131 - delta_y, 0),
-        #     (0.1835 + delta_x, 0.122 + delta_y, 0),
-        #     (-0.1926 - delta_x, -0.131 - delta_y, 0),
-        #     (-0.1926 - delta_x, 0.122 + delta_y, 0),
-        # ),
-        #     device=sim_config.sim_device)
         hip_position_single = to_torch((
             (0.1835 + delta_x, -0.131 - delta_y, 0),
             (0.1835 + delta_x, 0.122 + delta_y, 0),
             (-0.1926 - delta_x, -0.131 - delta_y, 0),
             (-0.1926 - delta_x, 0.122 + delta_y, 0),
-        ),
-            device=sim_config.sim_device)
+        ), device=sim_config.sim_device)
         self._hip_positions_in_body_frame = torch.stack([hip_position_single] *
                                                         num_envs,
                                                         dim=0)
-
         super().__init__(sim=sim,
                          viewer=viewer,
                          num_envs=num_envs,
+                         world_env=world_env,
                          init_positions=init_positions,
                          urdf_path="resources/go2/urdf/go2_ordered.urdf",
                          sim_config=sim_config,
@@ -273,8 +266,6 @@ class Go2(Robot):
     @property
     def hip_offset(self):
         """Position of hip offset in base frame, used for IK only."""
-        # print("!!!!!!!!!!!!!!!!!!!!!!!")
-        # time.sleep(123)
         return self._hip_offset
 
     def get_motor_angles_from_foot_positions(self, foot_local_positions):

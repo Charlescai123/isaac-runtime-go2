@@ -9,6 +9,8 @@ numpy==1.23.1
 pybullet
 qpth
 omegaconf==2.3.0
+scikit-fmm
+scikit-image
 tensorboard
 torch
 torchaudio

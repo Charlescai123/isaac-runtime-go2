@@ -81,7 +81,7 @@ def main(argv):
                            show_gui=FLAGS.show_gui,
                            use_real_robot=FLAGS.use_real_robot)
     # add_uneven_terrains(gym=env.robot._gym, sim=env.robot._sim)
-    env = env_wrappers.RangeNormalize(env)   # Normalize the environment
+    env = env_wrappers.RangeNormalize(env)  # Normalize the environment
     if FLAGS.use_real_robot:
         env.robot.state_estimator.use_external_contact_estimator = (not FLAGS.use_contact_sensor)
 
@@ -111,7 +111,7 @@ def main(argv):
     env._torque_optimizer._base_orientation_kd *= 1
     env._torque_optimizer._base_orientation_kp *= 1
     # env._swing_leg_controller._foot_landing_clearance = 0.1    # current 0
-    env._swing_leg_controller._foot_height = 0.15        # current 0.1
+    env._swing_leg_controller._foot_height = 0.15  # current 0.1
 
     print(f"swing: {env._swing_leg_controller._foot_landing_clearance}")
     print(f"swing: {env._swing_leg_controller._desired_base_height}")
@@ -121,13 +121,6 @@ def main(argv):
     print(f"robot: {env._torque_optimizer._base_position_kd}")
     print(f"robot: {env._torque_optimizer._base_orientation_kp}")
     print(f"robot: {env._torque_optimizer._base_orientation_kd}")
-
-    # env.load_plane_asset()
-    # env.add_snow_road()
-    # Add uneven terrains to show the patch strength
-    # add_uneven_terrains(gym=env.robot._gym, sim=env.robot._sim)
-    # from src.utils.sim_utils import add_terrain
-    # add_terrain(env._robot._gym, env._robot._sim)
 
     # time.sleep(3)
     start_time = time.time()
@@ -148,7 +141,7 @@ def main(argv):
             # if done.any():
             #     print(info["episode"])
             #     break
-            if steps_count == 2000:
+            if steps_count == 1000:
                 break
             print(f"steps_count: {steps_count}")
             e = time.time()
@@ -167,42 +160,6 @@ def main(argv):
         with open(output_path, "wb") as fh:
             pickle.dump(logs, fh)
         print(f"Data logged to: {output_path}")
-
-
-def add_uneven_terrains(gym, sim):
-    # terrains
-    num_terrains = 4
-    terrain_width = 12.
-    terrain_length = 12.
-    horizontal_scale = 0.1  # [m] resolution in x
-    vertical_scale = 0.01  # [m] resolution in z
-    num_rows = int(terrain_width / horizontal_scale)
-    num_cols = int(terrain_length / horizontal_scale)
-    heightfield = np.zeros((num_terrains * num_rows, num_cols), dtype=np.int16)
-
-    def new_sub_terrain(): return SubTerrain(width=num_rows, length=num_cols, vertical_scale=vertical_scale,
-                                             horizontal_scale=horizontal_scale)
-
-    # np.random.seed(42)  # works for vel 0.3 m/s
-    np.random.seed(3)  # works for all vel
-    heightfield[0:1 * num_rows, :] = random_uniform_terrain(new_sub_terrain(), min_height=-0.01, max_height=0.01,
-                                                            step=0.05, downsampled_scale=0.1).height_field_raw
-    heightfield[1 * num_rows:2 * num_rows, :] = sloped_terrain(new_sub_terrain(), slope=-0.5).height_field_raw
-    heightfield[2 * num_rows:3 * num_rows, :] = stairs_terrain(new_sub_terrain(), step_width=0.75,
-                                                               step_height=-0.35).height_field_raw
-    heightfield[2 * num_rows:3 * num_rows, :] = heightfield[2 * num_rows:3 * num_rows, :][::-1]
-    heightfield[3 * num_rows:4 * num_rows, :] = pyramid_stairs_terrain(new_sub_terrain(), step_width=0.75,
-                                                                       step_height=-0.5).height_field_raw
-
-    # add the terrain as a triangle mesh
-    vertices, triangles = convert_heightfield_to_trimesh(heightfield, horizontal_scale=horizontal_scale,
-                                                         vertical_scale=vertical_scale, slope_threshold=1.5)
-    tm_params = gymapi.TriangleMeshParams()
-    tm_params.nb_vertices = vertices.shape[0]
-    tm_params.nb_triangles = triangles.shape[0]
-    tm_params.transform.p.x = -12.
-    tm_params.transform.p.y = -terrain_width / 2 - 1.
-    gym.add_triangle_mesh(sim, vertices.flatten(), triangles.flatten(), tm_params)
 
 
 if __name__ == "__main__":

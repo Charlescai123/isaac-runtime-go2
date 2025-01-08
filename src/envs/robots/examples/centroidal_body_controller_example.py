@@ -1,9 +1,11 @@
-"""Example of running the phase gait generator."""
+"""Example of running the phase gait generator.
+python -m src.envs.robots.examples.centroidal_body_controller_example  --num_envs=2 --use_gpu=False --show_gui=True --use_real_robot=False
+"""
+
 from absl import app
 from absl import flags
 
 import time
-from typing import Sequence
 
 from isaacgym.torch_utils import to_torch
 import ml_collections
@@ -12,11 +14,12 @@ from tqdm import tqdm
 import torch
 
 from src.configs.defaults import sim_config
-from src.envs.robots.controllers import qp_torque_optimizer, raibert_swing_leg_controller
-from src.envs.robots.controllers import phase_gait_generator
+from src.envs.robots.controller import raibert_swing_leg_controller, phase_gait_generator
+from src.envs.robots.controller import qp_torque_optimizer
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.motors import MotorControlMode
 from isaacgym.terrain_utils import *
+from src.envs.terrains.wild_env import WildTerrainEnv
 
 flags.DEFINE_integer("num_envs", 1, "number of environments to create.")
 flags.DEFINE_float("total_time_secs", 20.,
@@ -57,7 +60,7 @@ def create_sim(sim_conf):
 
 def get_init_positions(num_envs: int,
                        distance: float = 1.,
-                       device: str = "cpu") -> Sequence[float]:
+                       device: str = "cpu") -> torch.Tensor:
     num_cols = int(np.sqrt(num_envs))
     init_positions = np.zeros((num_envs, 3))
     for idx in range(num_envs):
@@ -116,6 +119,7 @@ def main(argv):
                         init_positions=get_init_positions(
                             FLAGS.num_envs, device=sim_conf.sim_device),
                         sim=sim,
+                        world_env=WildTerrainEnv,
                         viewer=viewer,
                         sim_config=sim_conf,
                         motor_control_mode=MotorControlMode.HYBRID)
@@ -184,7 +188,10 @@ def main(argv):
     robot.reset()
     num_envs, num_dof = robot.num_envs, robot.num_dof
     steps_count = 0
-
+    torque_optimizer._base_position_kp *= 2
+    torque_optimizer._base_position_kd *= 2
+    torque_optimizer._base_orientation_kp *= 2
+    torque_optimizer._base_orientation_kd *= 2
     start_time = time.time()
     pbar = tqdm(total=FLAGS.total_time_secs)
     with torch.inference_mode():
@@ -208,6 +215,14 @@ def main(argv):
                 gait_generator.desired_contact_state,
                 swing_foot_position=swing_leg_controller.desired_foot_positions)
             e = time.time()
+
+
+            print(f"torque_optimizer.tracking_error: {torque_optimizer.tracking_error}")
+            print(f"robot: {torque_optimizer._base_position_kp}")
+            print(f"robot: {torque_optimizer._base_position_kd}")
+            print(f"robot: {torque_optimizer._base_orientation_kp}")
+            print(f"robot: {torque_optimizer._base_orientation_kd}")
+
             print(f"duration is: {e - s}")
             robot.step(motor_action)
 

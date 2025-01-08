@@ -11,8 +11,8 @@ import numpy as np
 import torch
 
 from src.configs.defaults import sim_config
-from src.envs.robots.controllers import qp_torque_optimizer, raibert_swing_leg_controller
-from src.envs.robots.controllers import phase_gait_generator
+from src.envs.robots.controller import raibert_swing_leg_controller, phase_gait_generator
+from src.envs.robots.controller import qp_torque_optimizer
 from src.envs import go1_rewards
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.motors import MotorControlMode
@@ -133,7 +133,7 @@ class Go2TrotEnv:
         from omegaconf import DictConfig
 
         teacher_config = DictConfig(
-            {"chi": 0.15, "tau": 50, "teacher_enable": True, "teacher_learn": True, "epsilon": 1,
+            {"chi": 0.15, "tau": 100, "teacher_enable": True, "teacher_learn": True, "epsilon": 1,
              "cvxpy_solver": "solver"}
         )
         # coordinator_config = DictConfig({"teacher_learn": True, "max_dwell_steps": 100})
@@ -154,29 +154,22 @@ class Go2TrotEnv:
         self._gym, self._sim, self._viewer = create_sim(self._sim_conf)
         self._create_terrain()
 
-        # Create env handles
-        env_lower = gymapi.Vec3(0., 0., 0.)
-        env_upper = gymapi.Vec3(0., 0., 0.)
-        for i in range(self._num_envs):
-            env_handle = self._gym.create_env(self._sim, env_lower, env_upper,
-                                              int(np.sqrt(self._num_envs)))
-            self._env_handles.append(env_handle)
+        # Initialize Wild Terrain Env (Must after the robot)
+        # self._wild_terrain_env = WildTerrainEnv(
+        #     sim=self._sim,
+        #     gym=self._gym,
+        #     viewer=self._viewer,
+        #     num_envs=self._num_envs,
+        #     env_handle=self._env_handles,
+        #     sim_config=self._sim_conf
+        # )
 
         # add_ground(self._gym, self._sim)
         # add_terrain(self._gym, self._sim, "stair")
         # add_terrain(self._gym, self._sim, "slope")
         # add_terrain(self._gym, self._sim, "stair", 3.95, True)
         # add_terrain(self._gym, self._sim, "stair", 0., True)
-
-        # Initialize Wild Terrain Env
-        # self._wild_terrain_env = WildTerrainEnv(
-        #     sim=self._sim,
-        #     gym=self._gym,
-        #     viewer=self._viewer,
-        #     num_envs=self._num_envs,
-        #     env_handles=self._env_handles,
-        #     sim_config=self._sim_conf
-        # )
+        print(f"self._env_handles: {self._env_handles}")
 
         self._indicator_flag = False
         self._indicator_cnt = 0
@@ -186,15 +179,20 @@ class Go2TrotEnv:
             robot_class = go2_robot.Go2Robot
         else:
             robot_class = go2.Go2
+
+        # The Robot Env
         self._robot = robot_class(
             num_envs=self._num_envs,
             init_positions=self._init_positions,
             sim=self._sim,
             viewer=self._viewer,
+            world_env=WildTerrainEnv,
             sim_config=self._sim_conf,
             motor_control_mode=MotorControlMode.HYBRID,
             motor_torque_delay_steps=self._config.get('motor_torque_delay_steps', 0)
         )
+
+        # self._init_buffer()
 
         strength_ratios = self._config.get('motor_strength_ratios', 0.7)
         if isinstance(strength_ratios, Sequence) and len(strength_ratios) == 2:
@@ -214,17 +212,6 @@ class Go2TrotEnv:
         self._robot.set_foot_frictions(0.01)
         self._robot.set_foot_frictions(self._config.get('foot_friction', 1.))
 
-        # print(f"self._config.gait: {self._config.gait}")
-        # import os
-        # current_dir = os.getcwd()
-        # print(current_dir)
-        # time.sleep(123)
-        # texture_handle = self._gym.create_texture_from_file(self._sim, './meshes/icy_road.png')
-        # self._gym.set_rigid_body_texture(self._robot._envs[0], self._robot._actors[0], 0, gymapi.MESH_VISUAL_AND_COLLISION, texture_handle)
-
-        # self.add_snow_road()
-        # self.load_plane_asset()
-
         # 获取所有 actor 的名称
         actor_count = self._gym.get_actor_count(self._robot._envs[0])
         actor_names = [self._gym.get_actor_name(self._robot._envs[0], i) for i in range(actor_count)]
@@ -232,7 +219,22 @@ class Go2TrotEnv:
         # 打印所有 actor 的名称
         for name in actor_names:
             print(name)
+        # 获取 root state tensor
+        root_state_tensor = self._gym.acquire_actor_root_state_tensor(self._sim)
+        self._gym.refresh_actor_root_state_tensor(self._sim)
 
+        # root_state = np.array(root_state_tensor).reshape(-1, 13)  # 13维状态向量
+        # from isaacgym import gymtorch
+        # print(f"root_state_tensor: {gymtorch.wrap_tensor(root_state_tensor)}")
+        # for actor_index in range(self._gym.get_actor_count(self._robot._envs[0])):
+        #     if self._gym.get_actor_name(self._robot._envs[0], actor_index) == "robot":
+        #         print(f"Found actor in env {self._robot._envs[0]}, index {actor_index}")
+        #         # 获取全局索引
+        #         global_index = env_index * actors_per_env + actor_index
+        #         actor_position = root_state[global_index, :3]
+        #         actor_rotation = root_state[global_index, 3:7]
+        #         print(f"Actor Position: {actor_position}")
+        #         print(f"Actor Rotation (Quaternion): {actor_rotation}")
         # time.sleep(123)
         def get_gait_config():
             config = ml_collections.ConfigDict()
@@ -262,7 +264,7 @@ class Go2TrotEnv:
             weight_ddq=self._config.get('qp_weight_ddq', np.diag([20.0, 20.0, 5.0, 1.0, 1.0, .2])),
             foot_friction_coef=self._config.get('qp_foot_friction_coef', 0.7),
             clip_grf=self._config.get('clip_grf_in_sim') or self._use_real_robot,
-            body_inertia=self._config.get('qp_body_inertia', np.array([0.14, 0.35, 0.35]) * 0.5),
+            # body_inertia=self._config.get('qp_body_inertia', np.diag([0.14, 0.35, 0.35]) * 0.5),
             use_full_qp=self._config.get('use_full_qp', False)
         )
 
@@ -300,6 +302,10 @@ class Go2TrotEnv:
                     self._torque_optimizer.get_action(
                         desired_contact_state, swing_foot_position=desired_foot_positions)
 
+    def _init_buffer(self):
+        self._robot._init_buffers()
+        self._robot._post_physics_step()
+
     def _create_terrain(self):
         """Creates terrains.
 
@@ -321,7 +327,6 @@ class Go2TrotEnv:
 
     def _compute_init_positions(self):
         init_positions = torch.zeros((self._num_envs, 3), device=self._device)
-
         num_cols = int(np.sqrt(self._num_envs))
         distance = 1.
         for idx in range(self._num_envs):
@@ -495,7 +500,6 @@ class Go2TrotEnv:
             #     self._gait_generator.stepping_frequency = gait_action[:, 0]
 
             # CoM pose action
-            # print(f"self._robot.base_position[:, 0]: {self._robot.base_position[:, 0].shape}")
             self._torque_optimizer.desired_base_position = torch.stack(
                 (zero, zero,
                  # com_action[:, 0]),
@@ -512,6 +516,11 @@ class Go2TrotEnv:
             self._torque_optimizer.desired_base_orientation_rpy = torch.stack(
                 (com_action[:, 4] * 0, com_action[:, 5] * 0, zero), dim=1)
 
+            # self._torque_optimizer.desired_angular_velocity = torch.stack(
+            #     (zero, zero, torch.full((self._num_envs,), 0.5).to(self._device)), dim=1)
+
+            print(f"self._torque_optimizer.desired_angular_velocity: {self._torque_optimizer.desired_angular_velocity}")
+            # time.sleep(123)
             # if self._config.get('use_yaw_feedback', False):
             #     yaw_err = (self._init_yaw - self._robot.base_orientation_rpy[:, 2])
             #     yaw_err = torch.remainder(yaw_err + 3 * torch.pi,
@@ -570,7 +579,7 @@ class Go2TrotEnv:
                                                                                         self._torque_optimizer.tracking_error.cpu()),
                                                                                     dwell_flag=dwell_flag,
                                                                                     epsilon=self.ha_teacher.epsilon)
-            time.sleep(0.1)
+            # time.sleep(0.1)
             # terminal_stance_ddq = torch.tile(torch.tensor(terminal_stance_ddq, dtype=torch.float32),
             #                                  dims=(self._num_envs, 1))
             # terminal_stance_ddq = hp_action
