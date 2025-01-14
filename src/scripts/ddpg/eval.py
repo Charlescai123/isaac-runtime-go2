@@ -61,11 +61,6 @@ def main(argv):
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.load(f, Loader=yaml.Loader)
 
-    with config.unlocked():
-        config.environment.jumping_distance_schedule = [1., 0.3]
-        # config.environment.qp_body_inertia = np.array([0.14, 0.35, 0.35]) * 6
-        config.environment.max_jumps = 6
-
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
                            config=config.environment,
@@ -92,7 +87,7 @@ def main(argv):
     with torch.inference_mode():
         while True:
             steps_count += 1
-            time.sleep(0.05)
+            # time.sleep(0.05)
             action = policy(state)
             state, _, reward, done, info = env.step(action)
             print(f"Time: {env.robot.time_since_reset}, Reward: {reward}")

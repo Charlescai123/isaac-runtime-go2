@@ -1,5 +1,5 @@
 from isaacgym import gymapi
-from MPC_Controller.common.Quadruped import RobotType
+
 from isaacgym.terrain_utils import *
 
 ASSET_ROOT = "assets"

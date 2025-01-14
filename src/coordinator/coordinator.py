@@ -18,6 +18,8 @@ class Coordinator:
         self._last_action_mode = None
 
     def get_terminal_action(self, hp_action, ha_action, plant_state, epsilon=None, dwell_flag=None):
+        """Given the system state and envelope boundary (epsilon), analyze the current safety status
+        and return which action (hp/ha) to switch for control"""
 
         if epsilon is None:
             epsilon = np.full(self._num_envs, self._default_epsilon)
@@ -34,9 +36,6 @@ class Coordinator:
         # Obtain all energies
         energy_2d = energy_value_2d(plant_state[:, 2:], MATRIX_P)
 
-        print(f"dwell_flag**********************************************: {dwell_flag}")
-        print(f"energy_2d: {energy_2d}")
-
         for i, energy in enumerate(energy_2d):
             # Display current system status based on energy
             if energy < epsilon[i]:
@@ -45,15 +44,14 @@ class Coordinator:
                 print(f"current system {i} energy status: {energy} >= {epsilon[i]}, system is unsafe")
 
             # When Teacher disabled or deactivated
-            print(f"np.any(ha_action[i]): {ha_action[i]}")
-            if not np.any(ha_action[i]) and dwell_flag[i] is False:
+            if not np.any(ha_action[i]) and bool(dwell_flag[i]) is False:
                 print("HA-Teacher is deactivated, use HP-Student's action instead")
                 self._action_mode[i] = ActionMode.STUDENT
                 self._plant_action[i] = hp_action[i]
 
                 terminal_stance_ddq_rtn[i] = hp_action[i]
                 action_mode_rtn[i] = ActionMode.STUDENT
-                # return hp_action, ActionMode.STUDENT
+                continue
 
             # Teacher activated
             if self._last_action_mode[i] == ActionMode.TEACHER:
@@ -69,7 +67,6 @@ class Coordinator:
 
                         terminal_stance_ddq_rtn[i] = ha_action[i]
                         action_mode_rtn[i] = ActionMode.TEACHER
-                        # return ha_action, ActionMode.TEACHER
 
                 # Switch back to HPC
                 else:
@@ -79,7 +76,6 @@ class Coordinator:
 
                     terminal_stance_ddq_rtn[i] = hp_action[i]
                     action_mode_rtn[i] = ActionMode.STUDENT
-                    # return hp_action, ActionMode.STUDENT
 
             elif self._last_action_mode[i] == ActionMode.STUDENT:
 
@@ -91,7 +87,6 @@ class Coordinator:
 
                     terminal_stance_ddq_rtn[i] = hp_action[i]
                     action_mode_rtn[i] = ActionMode.STUDENT
-                    # return hp_action, ActionMode.STUDENT
 
                 # Outside safety envelope (bounded by epsilon)
                 else:
@@ -101,7 +96,6 @@ class Coordinator:
 
                     terminal_stance_ddq_rtn[i] = ha_action[i]
                     action_mode_rtn[i] = ActionMode.TEACHER
-                    # return ha_action, ActionMode.TEACHER
             else:
                 raise RuntimeError(f"Unrecognized last action mode: {self._last_action_mode[i]} for {i}")
 

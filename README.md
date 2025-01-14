@@ -1,14 +1,16 @@
 # Isaac-PhyRL-Go2
 
+This project implements
+
 ## To Do ##
 * [x] Add BEV map to the repo
-* [ ] Fast Marching Method (FMM) implementation
-* [ ] Go2 real robot deployment
-  * [ ] Gazebo real-time testing
-  * [ ] ROS/ROS2 encapsulation
+* [x] Fast Marching Method (FMM) implementation
 * [ ] Incorporate more challenging scenarios
   * [ ] Dense forests (sandy terrain, trees)
   * [ ] inclined staircases, and rainy conditions
+* [ ] Go2 real robot deployment
+  * [ ] Gazebo real-time testing
+  * [ ] ROS/ROS2 encapsulation
 * [ ] Restructure the code as FSM and add teleoperation (optional)
 * [ ] Migration to Isaac-Lab
 

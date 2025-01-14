@@ -4,19 +4,25 @@ import itertools
 import time
 from typing import Sequence
 
-from isaacgym import gymapi, gymutil
+from isaacgym import gymapi, gymutil, gymtorch
 from isaacgym.torch_utils import to_torch
 import ml_collections
 import numpy as np
 import torch
 
 from src.configs.defaults import sim_config
-from src.envs.robots.controller import raibert_swing_leg_controller, phase_gait_generator
-from src.envs.robots.controller import qp_torque_optimizer
+from src.envs.robots.modules.controller import raibert_swing_leg_controller, qp_torque_optimizer
+from src.envs.robots.modules.gait_generator import phase_gait_generator
 from src.envs import go1_rewards
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.motors import MotorControlMode
 from src.envs.terrains.wild_env import WildTerrainEnv
+from src.ha_teacher.ha_teacher import HATeacher
+from src.coordinator.coordinator import Coordinator
+from src.physical_design import MATRIX_P
+from omegaconf import DictConfig
+
+from src.utils.utils import ActionMode
 
 
 def generate_seed_sequence(seed, num_seeds):
@@ -78,20 +84,16 @@ def create_sim(sim_conf):
     else:
         graphics_device_id = -1
 
-    print(f"self.sim_device_id: {sim_device_id}")
-    print(f"self.graphics_device_id: {graphics_device_id}")
-    print(f"self.physics_engine: {sim_conf.physics_engine}")
-    print(f"self.sim_params: {sim_conf.sim_params}")
+    # print(f"self.sim_device_id: {sim_device_id}")
+    # print(f"self.graphics_device_id: {graphics_device_id}")
+    # print(f"self.physics_engine: {sim_conf.physics_engine}")
+    # print(f"self.sim_params: {sim_conf.sim_params}")
     sim = gym.create_sim(sim_device_id, graphics_device_id, sim_conf.physics_engine, sim_conf.sim_params)
-    print(f"sim: {sim}")
 
     if sim_conf.show_gui:
         viewer = gym.create_viewer(sim, gymapi.CameraProperties())
-        print(f"viewer: {viewer}")
-        # time.sleep(123)
         gym.subscribe_viewer_keyboard_event(viewer, gymapi.KEY_ESCAPE, "QUIT")
-        gym.subscribe_viewer_keyboard_event(viewer, gymapi.KEY_V,
-                                            "toggle_viewer_sync")
+        gym.subscribe_viewer_keyboard_event(viewer, gymapi.KEY_V, "toggle_viewer_sync")
     else:
         viewer = None
 
@@ -128,15 +130,10 @@ class Go2TrotEnv:
                 self._config.observation_noise = to_torch(
                     self._config.observation_noise, device=self._device)
 
-        from src.ha_teacher.ha_teacher import HATeacher
-        from src.coordinator.coordinator import Coordinator
-        from omegaconf import DictConfig
-
         teacher_config = DictConfig(
             {"chi": 0.15, "tau": 100, "teacher_enable": True, "teacher_learn": True, "epsilon": 1,
              "cvxpy_solver": "solver"}
         )
-        # coordinator_config = DictConfig({"teacher_learn": True, "max_dwell_steps": 100})
         self.ha_teacher = HATeacher(num_envs=self._num_envs, teacher_cfg=teacher_config)
         self.coordinator = Coordinator(num_envs=self._num_envs)
 
@@ -148,21 +145,12 @@ class Go2TrotEnv:
             use_penetrating_contact=self._config.get('use_penetrating_contact', False)
         )
 
-        self.desired_vx = 0.7
+        self.desired_vx = 0.
         self.desired_com_height = 0.3
+        self.desired_wz = 0.3
 
         self._gym, self._sim, self._viewer = create_sim(self._sim_conf)
         self._create_terrain()
-
-        # Initialize Wild Terrain Env (Must after the robot)
-        # self._wild_terrain_env = WildTerrainEnv(
-        #     sim=self._sim,
-        #     gym=self._gym,
-        #     viewer=self._viewer,
-        #     num_envs=self._num_envs,
-        #     env_handle=self._env_handles,
-        #     sim_config=self._sim_conf
-        # )
 
         # add_ground(self._gym, self._sim)
         # add_terrain(self._gym, self._sim, "stair")
@@ -223,19 +211,6 @@ class Go2TrotEnv:
         root_state_tensor = self._gym.acquire_actor_root_state_tensor(self._sim)
         self._gym.refresh_actor_root_state_tensor(self._sim)
 
-        # root_state = np.array(root_state_tensor).reshape(-1, 13)  # 13维状态向量
-        # from isaacgym import gymtorch
-        # print(f"root_state_tensor: {gymtorch.wrap_tensor(root_state_tensor)}")
-        # for actor_index in range(self._gym.get_actor_count(self._robot._envs[0])):
-        #     if self._gym.get_actor_name(self._robot._envs[0], actor_index) == "robot":
-        #         print(f"Found actor in env {self._robot._envs[0]}, index {actor_index}")
-        #         # 获取全局索引
-        #         global_index = env_index * actors_per_env + actor_index
-        #         actor_position = root_state[global_index, :3]
-        #         actor_rotation = root_state[global_index, 3:7]
-        #         print(f"Actor Position: {actor_position}")
-        #         print(f"Actor Rotation (Quaternion): {actor_rotation}")
-        # time.sleep(123)
         def get_gait_config():
             config = ml_collections.ConfigDict()
             config.stepping_frequency = 2  # 1
@@ -247,14 +222,14 @@ class Go2TrotEnv:
             return config
 
         self._config.gait = get_gait_config()
-        # time.sleep(123)
-        self._gait_generator = phase_gait_generator.PhaseGaitGenerator(
-            self._robot, self._config.gait)
+        self._gait_generator = phase_gait_generator.PhaseGaitGenerator(self._robot, self._config.gait)
         self._swing_leg_controller = raibert_swing_leg_controller.RaibertSwingLegController(
             self._robot,
             self._gait_generator,
-            foot_height=self._config.get('swing_foot_height', 0.1),
-            foot_landing_clearance=self._config.get('swing_foot_landing_clearance', 0.))
+            desired_base_height=self.desired_com_height,
+            foot_height=self._config.get('swing_foot_height', 0.12),
+            foot_landing_clearance=self._config.get('swing_foot_landing_clearance', 0.02)
+        )
         self._torque_optimizer = qp_torque_optimizer.QPTorqueOptimizer(
             self._robot,
             base_position_kp=self._config.get('base_position_kp', np.array([0., 0., 50.])),
@@ -283,7 +258,6 @@ class Go2TrotEnv:
         self._cycle_count = torch.zeros(self._num_envs, device=self._device)
 
         self._rewards = go1_rewards.Go1Rewards(self)
-        self._prepare_rewards()
         self._extras = dict()
 
         # self.draw_lane()
@@ -321,9 +295,6 @@ class Go2TrotEnv:
         plane_params.restitution = 0.
         self._gym.add_ground(self._sim, plane_params)
         self._terrain = None
-
-        # from ippc.quad_gym.env_builder import build_a1_ground_env
-        # build_a1_ground_env()
 
     def _compute_init_positions(self):
         init_positions = torch.zeros((self._num_envs, 3), device=self._device)
@@ -366,52 +337,8 @@ class Go2TrotEnv:
         self._action_lb = to_torch(self._config.action_lb, device=self._device) * 5
         self._action_ub = to_torch(self._config.action_ub, device=self._device) * 5
 
-    def _prepare_rewards(self):
-        self._reward_names, self._reward_fns, self._reward_scales = [], [], []
-        self._episode_sums = dict()
-        for name, scale in self._config.rewards:
-            self._reward_names.append(name)
-            self._reward_fns.append(getattr(self._rewards, name + '_reward'))
-            self._reward_scales.append(scale)
-            self._episode_sums[name] = torch.zeros(self._num_envs,
-                                                   device=self._device)
-
-        self._terminal_reward_names, self._terminal_reward_fns, self._terminal_reward_scales = [], [], []
-        for name, scale in self._config.terminal_rewards:
-            self._terminal_reward_names.append(name)
-            self._terminal_reward_fns.append(getattr(self._rewards, name + '_reward'))
-            self._terminal_reward_scales.append(scale)
-            self._episode_sums[name] = torch.zeros(self._num_envs,
-                                                   device=self._device)
-
     def reset(self) -> torch.Tensor:
         return self.reset_idx(torch.arange(self._num_envs, device=self._device))
-
-    def _split_action(self, action):
-        gait_action = None
-        if self._config.get('include_gait_action', False):
-            gait_action = action[:, :1]
-            action = action[:, 1:]
-
-        foot_action = None
-        if self._config.get('include_foot_action', False):
-            if self._config.get('mirror_foot_action', False):
-                foot_action = action[:, -6:].reshape(
-                    (-1, 2, 3))  # + self._robot.hip_offset
-                foot_action = torch.stack([
-                    foot_action[:, 0],
-                    foot_action[:, 0],
-                    foot_action[:, 1],
-                    foot_action[:, 1],
-                ], dim=1)
-                action = action[:, :-6]
-            else:
-                foot_action = action[:, -12:].reshape(
-                    (-1, 4, 3))  # + self._robot.hip_offset
-                action = action[:, :-12]
-
-        com_action = action
-        return gait_action, com_action, foot_action
 
     def reset_idx(self, env_ids) -> torch.Tensor:
         # Aggregate rewards
@@ -426,27 +353,6 @@ class Go2TrotEnv:
             self._obs_buf = self._get_observations()
             self._privileged_obs_buf = self._get_privileged_observations()
 
-            for reward_name in self._episode_sums.keys():
-                if reward_name in self._reward_names:
-                    if self._config.get('normalize_reward_by_phase', False):
-                        self._extras["episode"]["reward_{}".format(
-                            reward_name)] = torch.mean(
-                            self._episode_sums[reward_name][env_ids] /
-                            (self._gait_generator.true_phase[env_ids] / (2 * torch.pi)))
-                    else:
-                        # Normalize by time
-                        self._extras["episode"]["reward_{}".format(
-                            reward_name)] = torch.mean(
-                            self._episode_sums[reward_name][env_ids] /
-                            (self._steps_count[env_ids] * (self._config.env_dt)))
-
-                if reward_name in self._terminal_reward_names:
-                    self._extras["episode"]["reward_{}".format(reward_name)] = torch.mean(
-                        self._episode_sums[reward_name][env_ids] /
-                        (self._cycle_count[env_ids].clip(min=1)))
-
-                self._episode_sums[reward_name][env_ids] = 0
-
             self._steps_count[env_ids] = 0
             self._cycle_count[env_ids] = 0
             self._init_yaw[env_ids] = self._robot.base_orientation_rpy[env_ids, 2]
@@ -459,18 +365,18 @@ class Go2TrotEnv:
 
         return self._obs_buf, self._privileged_obs_buf
 
-    def step(self, action: torch.Tensor):
+    def step(self, drl_action: torch.Tensor):
         self._cnt += 1
         # time.sleep(1)
         # print(f"action is: {action}")
         self._last_obs_buf = torch.clone(self._obs_buf)
 
-        self._last_action = torch.clone(action)
-        print(f"action before clip is: {action}")
+        self._last_action = torch.clone(drl_action)
+        print(f"drl_action before clip is: {drl_action}")
         print(f"self._action_lb: {self._action_lb}")
         print(f"self._action_ub: {self._action_ub}")
-        action = torch.clip(action, self._action_lb, self._action_ub)
-        print(f"step action is: {action}")
+        drl_action = torch.clip(drl_action, self._action_lb, self._action_ub)
+        print(f"step action is: {drl_action}")
         # time.sleep(1)
         # action = torch.zeros_like(action)
         sum_reward = torch.zeros(self._num_envs, device=self._device)
@@ -479,9 +385,6 @@ class Go2TrotEnv:
         logs = []
 
         zero = torch.zeros(self._num_envs, device=self._device)
-        # gait_action, com_action, foot_action = self._split_action(action)
-        com_action = action
-        # time.sleep(123)
         start = time.time()
         # self._config.env_dt = 0.002
 
@@ -490,80 +393,54 @@ class Go2TrotEnv:
             # print(f"self._robot.control_timestep: {self._robot.control_timestep}")
             self._gait_generator.update()
             self._swing_leg_controller.update()
+
+            # self._robot.state_estimator.update_ground_normal_vec()
+            # self._robot.state_estimator.update_foot_contact(self._gait_generator.desired_contact_state)
+
             if self._use_real_robot:
                 self._robot.state_estimator.update_foot_contact(
                     self._gait_generator.desired_contact_state)  # pytype: disable=attribute-error
                 self._robot.update_desired_foot_contact(
                     self._gait_generator.desired_contact_state)  # pytype: disable=attribute-error
 
-            # if gait_action is not None:
-            #     self._gait_generator.stepping_frequency = gait_action[:, 0]
-
             # CoM pose action
-            self._torque_optimizer.desired_base_position = torch.stack(
-                (zero, zero,
-                 # com_action[:, 0]),
-                 torch.full((self._num_envs,), self.desired_com_height).to(self._device)),
-                dim=1)
-            # self._torque_optimizer.desired_linear_velocity = torch.stack(
-            #     (com_action[:, 1], com_action[:, 2] * 0, com_action[:, 3]), dim=1)
+            self._torque_optimizer.desired_base_position = torch.stack((zero, zero, torch.full(
+                (self._num_envs,), self.desired_com_height).to(self._device)), dim=1)
+
             # self._torque_optimizer.desired_base_orientation_rpy = torch.stack(
             #     (com_action[:, 4] * 0, com_action[:, 5],
             #      self._robot.base_orientation_rpy[:, 2]),
             #     dim=1)
+
+            # CoM linear_vel, rpy
             self._torque_optimizer.desired_linear_velocity = torch.stack(
                 (torch.full((self._num_envs,), self.desired_vx).to(self._device), zero, zero), dim=1)
             self._torque_optimizer.desired_base_orientation_rpy = torch.stack(
-                (com_action[:, 4] * 0, com_action[:, 5] * 0, zero), dim=1)
+                (zero, zero, zero), dim=1)
 
-            # self._torque_optimizer.desired_angular_velocity = torch.stack(
-            #     (zero, zero, torch.full((self._num_envs,), 0.5).to(self._device)), dim=1)
+            # CoM angular_vel
+            self._torque_optimizer.desired_angular_velocity = torch.stack(
+                (zero, zero, torch.full((self._num_envs,), self.desired_wz).to(self._device)), dim=1)
 
-            print(f"self._torque_optimizer.desired_angular_velocity: {self._torque_optimizer.desired_angular_velocity}")
+            print(f"self._torque_optimizer.desired_angular_velocity: "
+                  f"{self._torque_optimizer.desired_angular_velocity}")
             # time.sleep(123)
-            # if self._config.get('use_yaw_feedback', False):
-            #     yaw_err = (self._init_yaw - self._robot.base_orientation_rpy[:, 2])
-            #     yaw_err = torch.remainder(yaw_err + 3 * torch.pi,
-            #                               2 * torch.pi) - torch.pi
-            #     desired_yaw_rate = 1 * yaw_err
-            #     self._torque_optimizer.desired_angular_velocity = torch.stack(
-            #         (zero, com_action[:, 6], desired_yaw_rate), dim=1)
-            # else:
-            #     self._torque_optimizer.desired_angular_velocity = torch.stack(
-            #         (zero, com_action[:, 6], com_action[:, 7] * 0), dim=1)
 
-            # if self._config.get('use_yaw_feedback', False):
-            #     yaw_err = (self._init_yaw - self._robot.base_orientation_rpy[:, 2])
-            #     yaw_err = torch.remainder(yaw_err + 3 * torch.pi,
-            #                               2 * torch.pi) - torch.pi
-            #     desired_yaw_rate = 1 * yaw_err
-            #     self._torque_optimizer.desired_angular_velocity = torch.stack(
-            #         (zero, zero, zero), dim=1)
-            # else:
-            #     self._torque_optimizer.desired_angular_velocity = torch.stack(
-            #         (zero, zero, com_action[:, 7] * 0), dim=1)
-
+            # Get swing leg action
             desired_foot_positions = self._swing_leg_controller.desired_foot_positions
-            # if foot_action is not None:
-            #     base_yaw = self._robot.base_orientation_rpy[:, 2]
-            #     cos_yaw = torch.cos(base_yaw)[:, None]
-            #     sin_yaw = torch.sin(base_yaw)[:, None]
-            #     foot_action[:, :, 0] *= -1  # DEBUG HACK
-            #     foot_action_world = torch.clone(foot_action)
-            #     foot_action_world[:, :, 0] = (cos_yaw * foot_action[:, :, 0] -
-            #                                   sin_yaw * foot_action[:, :, 1])
-            #     foot_action_world[:, :, 1] = (sin_yaw * foot_action[:, :, 0] +
-            #                                   cos_yaw * foot_action[:, :, 1])
-            #     desired_foot_positions += foot_action_world
+
             motor_action, self._desired_acc, self._solved_acc, self._qp_cost, self._num_clips = self._torque_optimizer.get_action(
                 self._gait_generator.desired_contact_state,
                 swing_foot_position=desired_foot_positions,
-                residual_acc=None)
-            hp_action = action * 3 + self._desired_acc
+                generated_acc=None)
 
-            self._robot.energy_2d = self.ha_teacher.update(
-                np.asarray(self._torque_optimizer.tracking_error.cpu()))
+            # HP-Student action (residual form)
+            hp_action = drl_action + self._desired_acc
 
+            # HA-Teacher update
+            self._robot.energy_2d = self.ha_teacher.update(np.asarray(self._torque_optimizer.tracking_error.cpu()))
+
+            # HA-Teacher action
             ha_action, dwell_flag = self.ha_teacher.get_action()
             ha_action = to_torch(ha_action, device=self._device)
 
@@ -579,27 +456,30 @@ class Go2TrotEnv:
                                                                                         self._torque_optimizer.tracking_error.cpu()),
                                                                                     dwell_flag=dwell_flag,
                                                                                     epsilon=self.ha_teacher.epsilon)
-            # time.sleep(0.1)
-            # terminal_stance_ddq = torch.tile(torch.tensor(terminal_stance_ddq, dtype=torch.float32),
-            #                                  dims=(self._num_envs, 1))
-            # terminal_stance_ddq = hp_action
+
             terminal_stance_ddq = to_torch(terminal_stance_ddq, device=self._device)
             print(f"terminal_stance_ddq: {terminal_stance_ddq}")
             print(f"action_mode: {action_mode}")
-            # time.sleep(123)
 
-            # motor_action, self._desired_acc, self._solved_acc, self._qp_cost, self._num_clips = self._torque_optimizer.get_action(
-            #     self._gait_generator.desired_contact_state,
-            #     swing_foot_position=desired_foot_positions,
-            #     residual_acc=action)
+            # HP-Student in Control
+            if action_mode == ActionMode.STUDENT:
+                motor_action, self._desired_acc, self._solved_acc, self._qp_cost, self._num_clips = self._torque_optimizer.get_action(
+                    self._gait_generator.desired_contact_state,
+                    swing_foot_position=desired_foot_positions,
+                    generated_acc=terminal_stance_ddq)
 
-            motor_action, self._desired_acc, self._solved_acc, self._qp_cost, self._num_clips = self._torque_optimizer.get_safe_action(
-                self._gait_generator.desired_contact_state,
-                swing_foot_position=desired_foot_positions,
-                safe_acc=terminal_stance_ddq)
+            # HA-Teacher in Control
+            elif action_mode == ActionMode.TEACHER:
+                motor_action, self._desired_acc, self._solved_acc, self._qp_cost, self._num_clips = self._torque_optimizer.get_safe_action(
+                    self._gait_generator.desired_contact_state,
+                    swing_foot_position=desired_foot_positions,
+                    safe_acc=terminal_stance_ddq)
+            else:
+                raise RuntimeError(f"Unrecognized Action Mode: {action_mode}")
 
             # print(f"desired_acc: {self._desired_acc}")
             # print(f"solved_acc: {self._solved_acc}")
+            print(f"self._robot.base_angular_velocity_world_frame: {self._robot.base_angular_velocity_world_frame}")
             logs.append(
                 dict(timestamp=self._robot.time_since_reset,
                      base_position=torch.clone(self._robot.base_position),
@@ -626,52 +506,32 @@ class Go2TrotEnv:
                      acc_max=to_torch([10, 10, 10, 20, 20, 20], device=self._device),
                      energy=to_torch(self._robot.energy_2d, device=self._device),
                      solved_acc_body_frame=self._solved_acc,
-                     foot_positions_in_base_frame=self._robot.
-                     foot_positions_in_base_frame,
-                     env_action=action,
-                     env_obs=torch.clone(self._obs_buf)))
+                     foot_positions_in_base_frame=self._robot.foot_positions_in_base_frame,
+                     env_action=drl_action,
+                     env_obs=torch.clone(self._obs_buf)
+                     )
+            )
+
             if self._use_real_robot:
                 logs[-1]["base_acc"] = np.array(
                     self._robot.raw_state.imu.accelerometer)  # pytype: disable=attribute-error
 
-            s_desired = torch.cat((
-                self._torque_optimizer.desired_base_position,
-                self._torque_optimizer.desired_base_orientation_rpy,
-                self._torque_optimizer.desired_linear_velocity,
-                self._torque_optimizer.desired_angular_velocity),
-                dim=-1)
-            print(f"s_desired: {s_desired}")
-            s_old = torch.cat((
-                self._robot.base_position,
-                self._robot.base_orientation_rpy,
-                self._robot.base_velocity_body_frame,
-                self._robot.base_angular_velocity_body_frame,
-            ), dim=-1)
-            print(f"s_old: {s_old}")
+            # Error in last step
+            err_prev = self._torque_optimizer.tracking_error
 
-            s = (s_old - s_desired)
-
+            ######### Step The Motor Action #########
             self._robot.step(motor_action)
+            #########################################
 
             self._obs_buf = self._get_observations()
             self._privileged_obs_buf = self.get_privileged_observations()
             # rewards = self.get_reward()
 
-            s_desired_next = torch.cat((
-                self._torque_optimizer.desired_base_position,
-                self._torque_optimizer.desired_base_orientation_rpy,
-                self._torque_optimizer.desired_linear_velocity,
-                self._torque_optimizer.desired_angular_velocity),
-                dim=-1)
+            # Error in next step
+            err_next = self._torque_optimizer.tracking_error
 
-            s_old_next = torch.cat((
-                self._robot.base_position,
-                self._robot.base_orientation_rpy,
-                self._robot.base_velocity_body_frame,
-                self._robot.base_angular_velocity_body_frame,
-            ), dim=-1)
-            s_next = (s_old_next - s_desired_next)
-            rewards = self.get_reward_ly(s=s, s_next=s_next)
+            # Get Lyapunov-like reward
+            rewards = self.get_reward_ly(err=err_prev, err_next=err_next)
 
             dones = torch.logical_or(dones, self._is_done())
             # print(f"rewards: {rewards.shape}")
@@ -679,90 +539,8 @@ class Go2TrotEnv:
             # print(f"sum_reward: {sum_reward.shape}")
             sum_reward += rewards * torch.logical_not(dones)
 
-            push_rng = np.random.default_rng(seed=42)
-
-            def _push_robots():
-                """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity.
-                """
-                # time.sleep(2)
-                # self.arrow_plot()
-
-                from isaacgym import gymtorch
-                # max_vel = self.cfg.domain_rand.max_push_vel_xy
-                max_vel = 1
-                # torch.manual_seed(30)
-                # self.robot._root_states[:, 7:9] = torch_rand_float(-max_vel, max_vel, (self.num_envs, 2),
-                #                                                    device=self.device)  # lin vel x/y
-
-                curr_vx = self.robot._root_states[:self._num_envs, 7]
-                curr_vy = self.robot._root_states[:self._num_envs, 8]
-                curr_vz = self.robot._root_states[:self._num_envs, 9]
-                print(f"self.robot._root_states: {self.robot._root_states}")
-                # time.sleep(123)
-
-                sgn = -1 if dual_push_sequence[self._push_cnt] % 2 == 0 else 1
-                # if self._push_cnt == 0:
-                #     self._push_magnitude *= sgn
-                # elif sgn == -1:
-                #     self._push_magnitude = -1.1
-                # elif sgn == 1:
-                #     self._push_magnitude = 1.9
-                # self._push_magnitude = push_magnitude_list[self._push_cnt]
-                # Original static push
-                # delta_x = -0.25
-                # delta_y = 0.62 * self._push_magnitude
-                # delta_z = -0.72
-
-                delta_x = push_delta_vel_list_x[self._push_cnt]
-                delta_y = push_delta_vel_list_y[self._push_cnt]
-                delta_z = push_delta_vel_list_z[self._push_cnt]
-
-                # Random push from uniform distribution
-                # new_seed = push_sequence[self._push_cnt]
-                # print(f"new_seed: {new_seed}")
-                # np.random.seed(new_seed)
-                # sgn = -1 if new_seed % 2 == 0 else 1
-                #
-                # delta_x = np.random.uniform(low=0., high=0.2) * sgn
-                # delta_y = np.random.uniform(low=0., high=0.6) * sgn
-                # delta_z = np.random.uniform(low=-0.8, high=-0.7)
-                print(f"delta_x: {delta_x}")
-                print(f"delta_y: {delta_y}")
-                print(f"delta_z: {delta_z}")
-                # time.sleep(2)
-
-                vel_after_push_x = curr_vx + delta_x
-                vel_after_push_y = curr_vy + delta_y
-                vel_after_push_z = curr_vz + delta_z
-
-                print(f"vel_after_push_x: {vel_after_push_x}")
-                print(f"vel_after_push_y: {vel_after_push_y}")
-                print(f"vel_after_push_z: {vel_after_push_z}")
-
-                # Turn on the push indicator for viewing
-                self.draw_push_indicator(target_pos=[delta_x, delta_y, delta_z])
-
-                # time.sleep(1)
-                # print(f"delta_x: {curr_x}")
-                self.robot._root_states[:self._num_envs, 7] = torch.full((self.num_envs, 1), vel_after_push_x.item())
-                self.robot._root_states[:self._num_envs, 8] = torch.full((self.num_envs, 1), vel_after_push_y.item())
-                # print(f"FFFFFFFFFFFFFFFFFFFFFFFFFFFF: {torch.full((self.num_envs, 1), .2)}")
-                self.robot._root_states[:self._num_envs, 9] = torch.full((self.num_envs, 1), vel_after_push_z.item())
-                # self._gym.set_actor_root_state_tensor(self._sim, gymtorch.unwrap_tensor(self.robot._root_states))
-
-                actor_count = self._gym.get_env_count(self._sim)
-                # self.robot._root_states = self.robot._root_states.repeat(7, 1)
-                indices = to_torch([i for i in range(self._num_envs)], dtype=torch.int32, device=self._device)
-                indices_tensor = gymtorch.unwrap_tensor(indices)
-                self._gym.set_actor_root_state_tensor_indexed(self._sim,
-                                                              gymtorch.unwrap_tensor(self.robot._root_states),
-                                                              indices_tensor,
-                                                              1)
-                self._push_cnt += 1
-                # self._gym.set_dof_state_tensor(self._sim, gymtorch.unwrap_tensor(self.robot._root_states))
-
             # torch.manual_seed(42)
-            random_interval = torch.randint(100, 200, (1,), dtype=torch.int64, device=self.device)
+            # random_interval = torch.randint(100, 200, (1,), dtype=torch.int64, device=self.device)
             # if self._cnt % random_interval == 0:
 
             if self._indicator_flag:
@@ -797,9 +575,6 @@ class Go2TrotEnv:
             # print(f"Gait: {gait_action}")
             # print(f"Foot: {foot_action}")
             # print(f"Phase: {self._obs_buf[:, 3]}")
-            # print(f"Desired contact: {self._gait_generator.desired_contact_state}")
-            # print(f"Desired Position: {self._torque_optimizer.desired_base_position}")
-            # print(f"Current Position: {self._robot.base_position}")
             # print(
             #     f"Desired Velocity: {self._torque_optimizer.desired_linear_velocity}")
             # print(f"Current Velocity: {self._robot.base_velocity_world_frame}")
@@ -818,6 +593,7 @@ class Go2TrotEnv:
             #   import pdb
             #   pdb.set_trace()
             self._extras["logs"] = logs
+
             # Resample commands
             new_cycle_count = (self._gait_generator.true_phase / (2 * torch.pi)).long()
             finished_cycle = new_cycle_count > self._cycle_count
@@ -825,10 +601,9 @@ class Go2TrotEnv:
             self._cycle_count = new_cycle_count
 
             is_terminal = torch.logical_or(finished_cycle, dones)
-            if is_terminal.any():
-                print(f"terminal_reward is: {self.get_terminal_reward(is_terminal, dones)}")
-                # sum_reward += self.get_terminal_reward(is_terminal, dones)
-            # print(self.get_terminal_reward(is_terminal))
+            # if is_terminal.any():
+            #     print(f"terminal_reward is: {self.get_terminal_reward(is_terminal, dones)}")
+
             # import pdb
             # pdb.set_trace()
             # self._resample_command(env_ids_to_resample)
@@ -900,17 +675,8 @@ class Go2TrotEnv:
         #     ),
         #     dim=1)
 
-        # print(f"robot_obs: {robot_obs}")
-        # print(f"robot_obs: {robot_obs.shape}")
-        # print(f"robot_obs: {phase_obs}")
-        # print(f"robot_obs: {phase_obs.shape}")
-        # print(f"distance_to_goal_local: {distance_to_goal_local}")
-        # print(f"distance_to_goal_local: {distance_to_goal_local.shape}")
-        # time.sleep(123)
-        # obs = torch.concatenate((distance_to_goal_local, phase_obs, robot_obs),dim=1)
         obs = robot_obs
-        if self._config.get("observation_noise",
-                            None) is not None and (not self._use_real_robot):
+        if self._config.get("observation_noise", None) is not None and (not self._use_real_robot):
             obs += torch.randn_like(obs) * self._config.observation_noise
         return obs
 
@@ -923,46 +689,25 @@ class Go2TrotEnv:
     def get_privileged_observations(self):
         return self._privileged_obs_buf
 
-    def get_reward(self):
-        sum_reward = torch.zeros(self._num_envs, device=self._device)
-        for idx in range(len(self._reward_names)):
-            reward_name = self._reward_names[idx]
-            reward_fn = self._reward_fns[idx]
-            reward_scale = self._reward_scales[idx]
-            reward_item = reward_scale * reward_fn()
-            if self._config.get('normalize_reward_by_phase', False):
-                reward_item *= self._gait_generator.stepping_frequency
-            self._episode_sums[reward_name] += reward_item
-            sum_reward += reward_item
-
-        if self._config.clip_negative_reward:
-            sum_reward = torch.clip(sum_reward, min=0)
-        return sum_reward
-
-    def get_reward_ly(self, s, s_next):
-        # sum_reward = torch.zeros(self._num_envs, device=self._device)
-
-        MATRIX_P = torch.tensor([[140.6434, 0, 0, 0, 0, 0, 5.3276, 0, 0, 0],
-                                 [0, 134.7596, 0, 0, 0, 0, 0, 6.6219, 0, 0],
-                                 [0, 0, 134.7596, 0, 0, 0, 0, 0, 6.622, 0],
-                                 [0, 0, 0, 49.641, 0, 0, 0, 0, 0, 6.8662],
-                                 [0, 0, 0, 0, 11.1111, 0, 0, 0, 0, 0],
-                                 [0, 0, 0, 0, 0, 3.3058, 0, 0, 0, 0],
-                                 [5.3276, 0, 0, 0, 0, 0, 3.6008, 0, 0, 0],
-                                 [0, 6.6219, 0, 0, 0, 0, 0, 3.6394, 0, 0],
-                                 [0, 0, 6.622, 0, 0, 0, 0, 0, 3.6394, 0],
-                                 [0, 0, 0, 6.8662, 0, 0, 0, 0, 0, 4.3232]], device=self._device)
-        s_new = s[:, 2:]
-        s_next_new = s_next[:, 2:]
+    def get_reward_ly(self, err, err_next):
+        """Get lyapunov-like reward
+            error: position_error     (p)
+                   orientation_error  (rpy)
+                   linear_vel_error   (v)
+                   angular_vel_error  (w)
+        """
+        _MATRIX_P = torch.tensor(MATRIX_P, dtype=torch.float32, device=self._device)
+        s_curr = err[:, 2:]
+        s_next = err_next[:, 2:]
         # print(f"s: {s.shape}")
         # print(f"s_new: {s_new.shape}")
         # ly_reward_curr = s_new.T @ MATRIX_P @ s_new
-        ST = torch.matmul(s_new, MATRIX_P)
-        ly_reward_curr = torch.sum(ST * s_new, dim=1, keepdim=True)
+        ST1 = torch.matmul(s_curr, _MATRIX_P)
+        ly_reward_curr = torch.sum(ST1 * s_curr, dim=1, keepdim=True)
 
         # ly_reward_next = s_next_new.T @ MATRIX_P @ s_next_new
-        ST = torch.matmul(s_next_new, MATRIX_P)
-        ly_reward_next = torch.sum(ST * s_next_new, dim=1, keepdim=True)
+        ST2 = torch.matmul(s_next, _MATRIX_P)
+        ly_reward_next = torch.sum(ST2 * s_next, dim=1, keepdim=True)
 
         sum_reward = ly_reward_curr - ly_reward_next  # multiply scaler to decrease
         # print(f"ly_reward_curr: {ly_reward_curr.shape}")
@@ -971,38 +716,7 @@ class Go2TrotEnv:
         # print(f"sum_reward: {sum_reward}")
         # sum_reward = torch.tensor(reward, device=self._device)
 
-        # for idx in range(len(self._reward_names)):
-        #     reward_name = self._reward_names[idx]
-        #     reward_fn = self._reward_fns[idx]
-        #     reward_scale = self._reward_scales[idx]
-        #     reward_item = reward_scale * reward_fn()
-        #     if self._config.get('normalize_reward_by_phase', False):
-        #         reward_item *= self._gait_generator.stepping_frequency
-        #     self._episode_sums[reward_name] += reward_item
-        #     sum_reward += reward_item
-        #
-        # if self._config.clip_negative_reward:
-        #     sum_reward = torch.clip(sum_reward, min=0)
         return sum_reward.squeeze(dim=-1)
-
-    def get_terminal_reward(self, is_terminal, dones):
-        early_term = torch.logical_and(
-            dones, torch.logical_not(self._episode_terminated()))
-        coef = torch.where(early_term, self._gait_generator.cycle_progress,
-                           torch.ones_like(early_term))
-
-        sum_reward = torch.zeros(self._num_envs, device=self._device)
-        for idx in range(len(self._terminal_reward_names)):
-            reward_name = self._terminal_reward_names[idx]
-            reward_fn = self._terminal_reward_fns[idx]
-            reward_scale = self._terminal_reward_scales[idx]
-            reward_item = reward_scale * reward_fn() * is_terminal * coef
-            self._episode_sums[reward_name] += reward_item
-            sum_reward += reward_item
-
-        if self._config.clip_negative_terminal_reward:
-            sum_reward = torch.clip(sum_reward, min=0)
-        return sum_reward
 
     def _episode_terminated(self):
         timeout = (self._steps_count >= self._episode_length)
@@ -1087,11 +801,90 @@ class Go2TrotEnv:
         self._cycle_count = (self._gait_generator.true_phase /
                              (2 * torch.pi)).long()
 
-    @property
-    def device(self):
-        return self._device
+    def _push_robots(self):
+        """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity.
+        """
+
+        push_rng = np.random.default_rng(seed=42)
+        # time.sleep(2)
+        # self.arrow_plot()
+
+        # max_vel = self.cfg.domain_rand.max_push_vel_xy
+        max_vel = 1
+        # torch.manual_seed(30)
+        # self.robot._root_states[:, 7:9] = torch_rand_float(-max_vel, max_vel, (self.num_envs, 2),
+        #                                                    device=self.device)  # lin vel x/y
+
+        curr_vx = self.robot._root_states[:self._num_envs, 7]
+        curr_vy = self.robot._root_states[:self._num_envs, 8]
+        curr_vz = self.robot._root_states[:self._num_envs, 9]
+        print(f"self.robot._root_states: {self.robot._root_states}")
+        # time.sleep(123)
+
+        sgn = -1 if dual_push_sequence[self._push_cnt] % 2 == 0 else 1
+        # if self._push_cnt == 0:
+        #     self._push_magnitude *= sgn
+        # elif sgn == -1:
+        #     self._push_magnitude = -1.1
+        # elif sgn == 1:
+        #     self._push_magnitude = 1.9
+        # self._push_magnitude = push_magnitude_list[self._push_cnt]
+        # Original static push
+        # delta_x = -0.25
+        # delta_y = 0.62 * self._push_magnitude
+        # delta_z = -0.72
+
+        delta_x = push_delta_vel_list_x[self._push_cnt]
+        delta_y = push_delta_vel_list_y[self._push_cnt]
+        delta_z = push_delta_vel_list_z[self._push_cnt]
+
+        # Random push from uniform distribution
+        # new_seed = push_sequence[self._push_cnt]
+        # print(f"new_seed: {new_seed}")
+        # np.random.seed(new_seed)
+        # sgn = -1 if new_seed % 2 == 0 else 1
+        #
+        # delta_x = np.random.uniform(low=0., high=0.2) * sgn
+        # delta_y = np.random.uniform(low=0., high=0.6) * sgn
+        # delta_z = np.random.uniform(low=-0.8, high=-0.7)
+        print(f"delta_x: {delta_x}")
+        print(f"delta_y: {delta_y}")
+        print(f"delta_z: {delta_z}")
+        # time.sleep(2)
+
+        vel_after_push_x = curr_vx + delta_x
+        vel_after_push_y = curr_vy + delta_y
+        vel_after_push_z = curr_vz + delta_z
+
+        print(f"vel_after_push_x: {vel_after_push_x}")
+        print(f"vel_after_push_y: {vel_after_push_y}")
+        print(f"vel_after_push_z: {vel_after_push_z}")
+
+        # Turn on the push indicator for viewing
+        self.draw_push_indicator(target_pos=[delta_x, delta_y, delta_z])
+
+        # time.sleep(1)
+        # print(f"delta_x: {curr_x}")
+        self.robot._root_states[:self._num_envs, 7] = torch.full((self.num_envs, 1), vel_after_push_x.item())
+        self.robot._root_states[:self._num_envs, 8] = torch.full((self.num_envs, 1), vel_after_push_y.item())
+        # print(f"FFFFFFFFFFFFFFFFFFFFFFFFFFFF: {torch.full((self.num_envs, 1), .2)}")
+        self.robot._root_states[:self._num_envs, 9] = torch.full((self.num_envs, 1), vel_after_push_z.item())
+        # self._gym.set_actor_root_state_tensor(self._sim, gymtorch.unwrap_tensor(self.robot._root_states))
+
+        actor_count = self._gym.get_env_count(self._sim)
+        # self.robot._root_states = self.robot._root_states.repeat(7, 1)
+        indices = to_torch([i for i in range(self._num_envs)], dtype=torch.int32, device=self._device)
+        indices_tensor = gymtorch.unwrap_tensor(indices)
+        self._gym.set_actor_root_state_tensor_indexed(self._sim,
+                                                      gymtorch.unwrap_tensor(self.robot._root_states),
+                                                      indices_tensor,
+                                                      1)
+        self._push_cnt += 1
+        # self._gym.set_dof_state_tensor(self._sim, gymtorch.unwrap_tensor(self.robot._root_states))
 
     def draw_push_indicator(self, target_pos=[1., 0., 0.]):
+        """Draw the line indicator for pushing the robot"""
+
         sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.01, 50, 50, None, color=(1, 0., 0.))
         pose_robot = self.robot._root_states[:self._num_envs, :3].squeeze(dim=0).cpu().numpy()
         print(f"pose_robot: {pose_robot}")

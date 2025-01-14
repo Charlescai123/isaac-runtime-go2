@@ -1,5 +1,5 @@
 """Vectorized Go2 robot in Isaac Gym."""
-from typing import Any, Sequence, List
+from typing import Any, Sequence
 
 from isaacgym.torch_utils import to_torch
 import ml_collections
@@ -258,6 +258,60 @@ class Go2(Robot):
                              "3_RR_thigh",
                              "4_RL_thigh",
                          ])
+        # from src.envs.robots.modules.estimator import state_estimator
+        # self._state_estimator = state_estimator.StateEstimator(self, use_external_contact_estimator=False)
+
+    # def step(self, action):
+    #     from isaacgym import gymtorch
+    #     for _ in range(self._sim_config.action_repeat):
+    #         self._torques, _ = self.motor_group.convert_to_torque(
+    #             action, self._motor_positions, self._motor_velocities)
+    #         # time.sleep(1)
+    #         self._gym.set_dof_actuation_force_tensor(
+    #             self._sim, gymtorch.unwrap_tensor(self._torques))
+    #         self._gym.simulate(self._sim)
+    #         # if self._device == "cpu":
+    #         self._gym.fetch_results(self._sim, True)
+    #
+    #         self._gym.refresh_dof_state_tensor(self._sim)
+    #         self._time_since_reset += self._sim_config.sim_params.dt
+    #
+    #         # self._state_estimator.update_sim(self._raw_state)
+    #         # self._state_estimator.update_ground_normal_vec()
+    #         # self._state_estimator.update_foot_contact()
+    #
+    #     self._post_physics_step()
+    #
+    # def reset_idx(self, env_ids):
+    #     super().reset_idx(env_ids)
+    #     self._state_estimator.reset()
+    #
+    # @property
+    # def base_position(self):
+    #     return to_torch([self._state_estimator.estimated_position], device=self._device)
+    #
+    # @property
+    # def base_velocity_world_frame(self):
+    #     return to_torch(self._state_estimator.estimated_velocity[None, :], device=self._device)
+    #
+    # @property
+    # def base_velocity_body_frame(self):
+    #     return to_torch(self._base_rot_mat.T.dot(self._state_estimator.estimated_velocity)[None, :],
+    #                     device=self._device)
+    #
+    # @property
+    # def base_angular_velocity_body_frame(self):
+    #     """Smoothed using moving-window filter"""
+    #     return to_torch(self._state_estimator.angular_velocity[None, :], device=self._device)
+    #
+    # @property
+    # def base_angular_velocity_world_frame(self):
+    #     return to_torch(self._base_rot_mat.T.dot(self._state_estimator.angular_velocity)[None, :],
+    #                     device=self._device)
+    #
+    # @property
+    # def state_estimator(self):
+    #     return self._state_estimator
 
     @property
     def hip_positions_in_body_frame(self):

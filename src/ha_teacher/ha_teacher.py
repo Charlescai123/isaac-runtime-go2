@@ -36,15 +36,14 @@ class HATeacher:
         self._patch_center = np.zeros((self._num_envs, 12))
         self._center_update = np.array([True] * self._num_envs)  # Patch center update flag
         self._dwell_step = np.zeros(self._num_envs)  # Dwell step
-        # self.patch_interval = 5
-        self.patch_interval = np.array([5] * self._num_envs)
+        _patch_interval = 5
+        self.patch_interval = np.array([_patch_interval] * self._num_envs)
+        _apply_realtime_patch = True
+        self.apply_realtime_patch = np.array([_apply_realtime_patch] * self._num_envs)
 
         # Patch kp and kd
         # self._default_kp = np.diag((0., 0., 100., 100., 100., 0.))
         # self._default_kd = np.diag((40., 30., 10., 10., 10., 30.))
-        # self.apply_realtime_patch = False
-        self.apply_realtime_patch = np.array([True] * self._num_envs)
-
         self._default_kp = np.array([[-0., -0., -0., -0., -0., -0.],
                                      [-0., -0., -0., -0., -0., -0.],
                                      [-0., -0., 296., 0., - 0., 0.],
@@ -56,7 +55,9 @@ class HATeacher:
                                      [0., -0., 28., 0., -0., 0.],
                                      [0., 0., -0., 26, 0., 0.],
                                      [-0., 0., 0., -0., 26., -0.],
-                                     [0., 0., 0., 0., -0., 25.]]) * 4
+                                     [0., 0., 0., 0., -0., 25.]])
+        # self._default_kp = np.diag((0, 0, 100, 100, 100, 0))
+        # self._default_kd = np.diag((20, 20, 20, 20, 20, 20,))
 
         self._patch_kp = np.array([self._default_kp] * self._num_envs)
         self._patch_kd = np.array([self._default_kd] * self._num_envs)
@@ -133,6 +134,7 @@ class HATeacher:
 
         # Find the object that needs to be patched
         to_patch = self.apply_realtime_patch & (self.action_counter % self.patch_interval == 0)
+        print(f"to_patch: {to_patch}")
         if np.any(to_patch):
             indices = np.argwhere(to_patch)
             for idx in indices:

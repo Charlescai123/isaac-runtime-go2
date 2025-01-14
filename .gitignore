@@ -17,6 +17,7 @@ corl_ckpts/
 # Distribution / packaging
 .Python
 build/
+debug/
 develop-eggs/
 isaacgym
 dist/

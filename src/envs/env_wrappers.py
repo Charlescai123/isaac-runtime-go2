@@ -44,8 +44,8 @@ class RangeNormalize(AttributeModifier):
         # action = self._denormalize_action(action)
         import numpy as np
 
-        # magnitude = to_torch([4, 4, 2, 8, 8, 4], device=self._device) * 1  # 6 dims
-        magnitude = to_torch([4, 8, 2, 6, 4, 1], device=self._device) * 0.8  # 6 dims
+        magnitude = to_torch([4, 4, 2, 8, 8, 4], device=self._device) * 1  # 6 dims
+        # magnitude = to_torch([4, 4, 2, 8, 2, 0.], device=self._device) * 2 # 6 dims
         # magnitude = np.array([2, 1, 2, 2, 1, 0.5]) * 2  # 6 dims
         action *= magnitude
         # action_zeros = torch.zeros_like(action)

@@ -1,23 +1,27 @@
 """Evaluate a trained policy."""
+import warnings
 
 """
-python -m src.agents.ppo.eval --logdir=logs/train/pronk_cajun --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False --save_traj=True
+python -m src.scripts.ddpg.eval_rlm --logdir=logs/train/pronk_cajun/2024_10_31_00_04_18 --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False --save_traj=True
 """
 
 from absl import app
 from absl import flags
 # from absl import logging
+from isaacgym import gymapi, gymutil
 from datetime import datetime
 import os
 import pickle
 import time
 
-from isaacgym.terrain_utils import *
-from src.envs import env_wrappers
-from src.envs.robots.modules.planner.bev_utils import *
+from isaacgym.torch_utils import to_torch  # pylint: disable=unused-import
 from rsl_rl.runners import OnPolicyRunner
+import numpy as np
 import torch
 import yaml
+
+from isaacgym.terrain_utils import *
+from src.envs import env_wrappers
 
 torch.set_printoptions(precision=2, sci_mode=False)
 
@@ -51,6 +55,21 @@ def main(argv):
     del argv  # unused
     # print(f"flag: {FLAGS.save_traj}")
     # time.sleep(123)
+
+    import yaml
+    yaml_file_path = "src/scripts/ddpg/configs/ddpg.yaml"
+
+    with open(yaml_file_path, 'r') as file:
+        cfg = yaml.safe_load(file)
+    # from types import SimpleNamespace
+    # cfg = SimpleNamespace(**cfg_dict)
+    # 现在 cfg 是一个字典，可以像访问字典一样访问配置
+    print(cfg)
+    # time.sleep(123)
+
+    from src.scripts.ppo.ddpg_agent import DDPGAgent
+    ddpg_agent = DDPGAgent(cfg['agents'])
+
     device = "cuda" if FLAGS.use_gpu else "cpu"
 
     # Load config and policy
@@ -77,7 +96,7 @@ def main(argv):
                            config=config.environment,
                            show_gui=FLAGS.show_gui,
                            use_real_robot=FLAGS.use_real_robot)
-    # add_uneven_terrains(gym=env.robot._gym, sim=env.robot._sim)
+    # add_uneven_terrains(gym=gym, sim=sim)
     env = env_wrappers.RangeNormalize(env)
     if FLAGS.use_real_robot:
         env.robot.state_estimator.use_external_contact_estimator = (not FLAGS.use_contact_sensor)
@@ -108,7 +127,7 @@ def main(argv):
     env._torque_optimizer._base_orientation_kd *= 1
     env._torque_optimizer._base_orientation_kp *= 1
     # env._swing_leg_controller._foot_landing_clearance = 0.1    # current 0
-    env._swing_leg_controller._foot_height = 0.15  # current 0.1
+    env._swing_leg_controller._foot_height = 0.13  # current 0.1
 
     print(f"swing: {env._swing_leg_controller._foot_landing_clearance}")
     print(f"swing: {env._swing_leg_controller._desired_base_height}")
@@ -119,38 +138,44 @@ def main(argv):
     print(f"robot: {env._torque_optimizer._base_orientation_kp}")
     print(f"robot: {env._torque_optimizer._base_orientation_kd}")
 
-    # env.load_plane_asset()
-    # env.add_snow_road()
-    # Add uneven terrains to show the patch strength
-    # add_uneven_terrains(gym=env.robot._gym, sim=env.robot._sim)
-    # from src.utils.sim_utils import add_terrain
-    # add_terrain(env._robot._gym, env._robot._sim)
-
-    # time.sleep(3)
+    # time.sleep(1)
     start_time = time.time()
     logs = []
     with torch.inference_mode():
         while True:
             s = time.time()
             steps_count += 1
-            # time.sleep(0.05)
-            action = policy(state)
+            # time.sleep(0.02)
+            print(f"state is: {state}")
+
+            # action = policy(state)
+
+            def add_beta_noise(action):
+                np.random.seed(1)
+                action = action.cpu().numpy()
+                beta_distribution_noise = np.random.beta(a=1.5, b=0.8, size=6) * 20
+                action += beta_distribution_noise
+                # action = np.clip(action, -1.0, 1.0)
+                return to_torch(action, device=device)
+
+            # time.sleep(123)
+            # print(f"state is: {action2}")
+            # print(f"state is: {type(action2)}")
+
+            # Original A1 Policy
+            action = to_torch(ddpg_agent.actor(state.cpu().numpy()).numpy(), device=device)
+
+            # Add beta noise
+            print(f"pre action is: {action}")
+            action = add_beta_noise(action=action)
             print(f"action is: {action}")
+
+            print(f"action is: {action}")
+            # print(f"action is: {type(action)}")
+            # print(f"action is: {to_torch(action.numpy())}")
+            # print(f"action is: {type(to_torch(action))}")
             # action = torch.zeros(6).unsqueeze(dim=0)
             state, _, reward, done, info = env.step(action)
-            # pcd_points = np.load("new_pcld.npy")
-            # pcd_points = pcd_points[:, [2, 0, 1]]
-            # pcd_points[:, 0] += 10
-            # pcd_points[:, 1] -= 30
-            # pcd_points[:, 2] += 2
-            # bev_img = birds_eye_point_cloud(pcd_points)
-            # plt.imshow(bev_img)
-            # plt.show()
-            # print("loaded!!!!")
-            # time.sleep(123)
-            # Add BEV
-            # add_bev_map(env=env, idx=steps_count)
-            print(f"steps_count: {steps_count}")
             print(f"Time: {env.robot.time_since_reset}, Reward: {reward}")
 
             total_reward += reward
@@ -158,14 +183,12 @@ def main(argv):
             # if done.any():
             #     print(info["episode"])
             #     break
-            if steps_count == 1000:
+            if steps_count == 999:
                 break
             print(f"steps_count: {steps_count}")
             e = time.time()
             print(
                 f"***********************************************************************************duration: {e - s}")
-    if env.robot.record_video:
-        record_depth_video(env._robot._frames)
 
     print(f"Total reward: {total_reward}")
     print(f"Time elapsed: {time.time() - start_time}")
@@ -179,78 +202,6 @@ def main(argv):
         with open(output_path, "wb") as fh:
             pickle.dump(logs, fh)
         print(f"Data logged to: {output_path}")
-
-
-def record_rgb_video(frames):
-    import cv2
-    frame_width = 1920
-    frame_height = 1080
-    fps = 30
-    output_filename = 'camera_rgb.avi'
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-
-    out = cv2.VideoWriter(output_filename, fourcc, fps, (frame_width, frame_height))
-
-    for frame in frames:
-        out.write(frame)
-
-    out.release()
-    cv2.destroyAllWindows()
-
-
-def record_depth_video(frames):
-    import cv2
-    frame_width = 1920
-    frame_height = 1080
-    fps = 30
-    output_filename = 'camera_depth.avi'
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-
-    video_writer = cv2.VideoWriter(output_filename, fourcc, fps, (frame_width, frame_height))
-
-    max_depth = 10.0
-    for depth_map in frames:
-        # 1. 将深度图归一化到 [0, 255] 并转换为 uint8
-        depth_normalized = (depth_map / max_depth * 255).astype(np.uint8)
-
-        # 2. 可选：使用伪彩色增强可视化
-        depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
-
-        # 3. 写入视频
-        video_writer.write(depth_colored)
-
-    video_writer.release()
-    cv2.destroyAllWindows()
-
-
-def update_depth_buffer(self):
-    from isaacgym import gymtorch
-    if not self.cfg.depth.use_camera:
-        return
-
-    if self.global_counter % self.cfg.depth.update_interval != 0:
-        return
-    self.gym.step_graphics(self.sim)  # required to render in headless mode
-    self.gym.render_all_camera_sensors(self.sim)
-    self.gym.start_access_image_tensors(self.sim)
-
-    for i in range(self.num_envs):
-        depth_image_ = self.gym.get_camera_image_gpu_tensor(self.sim,
-                                                            self.envs[i],
-                                                            self.cam_handles[i],
-                                                            gymapi.IMAGE_DEPTH)
-
-        depth_image = gymtorch.wrap_tensor(depth_image_)
-        depth_image = self.process_depth_image(depth_image, i)
-
-        init_flag = self.episode_length_buf <= 1
-        if init_flag[i]:
-            self.depth_buffer[i] = torch.stack([depth_image] * self.cfg.depth.buffer_len, dim=0)
-        else:
-            self.depth_buffer[i] = torch.cat([self.depth_buffer[i, 1:], depth_image.to(self.device).unsqueeze(0)],
-                                             dim=0)
-
-    self.gym.end_access_image_tensors(self.sim)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 """Example of Go2 robots in Isaac Gym."""
+"""python -m src.envs.robots.examples.go2_robot_exercise_example"""
 from absl import app
 from absl import flags
 
@@ -14,11 +15,12 @@ from tqdm import tqdm
 from src.configs.defaults import sim_config
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.motors import MotorCommand, MotorControlMode
+from src.envs.terrains.wild_env import WildTerrainEnv
 
 flags.DEFINE_bool("show_gui", True, "whether to show GUI.")
 flags.DEFINE_bool("use_gpu", True, "whether to use GPU.")
 flags.DEFINE_bool("use_real_robot", False, "whether to run on real robot.")
-flags.DEFINE_integer("num_envs", 10, "number of environments to create.")
+flags.DEFINE_integer("num_envs", 1, "number of environments to create.")
 FLAGS = flags.FLAGS
 
 
@@ -95,6 +97,7 @@ def main(argv):
                         sim=sim,
                         viewer=viewer,
                         sim_config=sim_conf,
+                        world_env=WildTerrainEnv,
                         motor_control_mode=MotorControlMode.HYBRID)
     robot.reset()
     start_time = time.time()

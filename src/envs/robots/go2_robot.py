@@ -8,9 +8,11 @@ import numpy as np
 import pybullet as p
 import torch
 
-import go1_interface
-from src.envs.robots import state_estimator, go2
+import go2_interface
+from src.envs.robots import go2
+from src.envs.robots.modules.estimator import state_estimator
 from src.envs.robots.motors import MotorCommand, MotorControlMode
+from src.envs.terrains.wild_env import WildTerrainEnv
 
 
 class Go2Robot(go2.Go2):
@@ -43,6 +45,7 @@ class Go2Robot(go2.Go2):
         super().__init__(sim=sim,
                          viewer=viewer,
                          num_envs=num_envs,
+                         world_env=WildTerrainEnv,
                          init_positions=init_positions,
                          sim_config=sim_config,
                          motor_control_mode=motor_control_mode)
@@ -304,7 +307,7 @@ class Go2Robot(go2.Go2):
 
     @property
     def mpc_body_height(self):
-        return 0.26
+        return 0.3
 
     @property
     def raw_state(self):
