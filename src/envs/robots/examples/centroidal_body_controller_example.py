@@ -1,6 +1,9 @@
 """Example of running the phase gait generator.
-python -m src.envs.robots.examples.centroidal_body_controller_example  --num_envs=2 --use_gpu=False --show_gui=True --use_real_robot=False
+python -m src.envs.robots.examples.centroidal_body_controller_example  --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False
 """
+import os
+import pickle
+from datetime import datetime
 
 from absl import app
 from absl import flags
@@ -13,6 +16,7 @@ import scipy
 from tqdm import tqdm
 import torch
 
+import matplotlib.pyplot as plt
 from src.configs.defaults import sim_config
 from src.envs.robots.modules.controller import raibert_swing_leg_controller, qp_torque_optimizer
 from src.envs.robots.modules.gait_generator import phase_gait_generator
@@ -20,11 +24,15 @@ from src.envs.robots import go2_robot, go2
 from src.envs.robots.motors import MotorControlMode
 from isaacgym.terrain_utils import *
 from src.envs.terrains.wild_env import WildTerrainEnv
+from src.utils.utils import energy_value_2d, ActionMode
+from src.physical_design import MATRIX_P
 
 flags.DEFINE_integer("num_envs", 1, "number of environments to create.")
-flags.DEFINE_float("total_time_secs", 250.,
+flags.DEFINE_float("total_time_secs", 100.,
                    "total amount of time to run the controller.")
+flags.DEFINE_string("traj_dir", "logs/eval/", "traj_dir.")
 flags.DEFINE_bool("use_gpu", True, "whether to show GUI.")
+flags.DEFINE_bool("save_traj", True, "whether to save trajectory.")
 flags.DEFINE_bool("show_gui", True, "whether to show GUI.")
 flags.DEFINE_bool("use_real_robot", False, "whether to run on real robot.")
 FLAGS = flags.FLAGS
@@ -160,7 +168,7 @@ def main(argv):
     # gym.set_camera_location(camera_handle, robot._envs[0], camera_transform)
 
     # time.sleep(123)
-    import matplotlib.pyplot as plt
+
     # camera_handle = robot._gym.create_camera_sensor(robot._envs[0], camera_props)
     mean_pos = torch.min(robot.base_position_world, dim=0)[0].cpu().numpy() + np.array([-2.5, -2.5, 2.5])
     target_pos = torch.mean(robot.base_position_world,
@@ -170,17 +178,14 @@ def main(argv):
     f, axarr = plt.subplots(2, 2, figsize=(16, 16))
     plt.axis('off')
     plt.tight_layout(pad=0)
-    stepX = 1
-    stepY = 1
-    near_val = 0.1
-    far_val = 5
 
+    logs = []
     # time.sleep(5)
 
     gait_config = get_gait_config()
     gait_generator = phase_gait_generator.PhaseGaitGenerator(robot, gait_config)
     swing_leg_controller = raibert_swing_leg_controller.RaibertSwingLegController(
-        robot, gait_generator, foot_landing_clearance=0.02, foot_height=0.12)
+        robot, gait_generator, foot_landing_clearance=0.01, foot_height=0.12)
     torque_optimizer = qp_torque_optimizer.QPTorqueOptimizer(
         robot,
         desired_body_height=0.3,
@@ -216,13 +221,17 @@ def main(argv):
                 robot.time_since_reset[0].cpu())
             print(lin_command, ang_command)
 
-            torque_optimizer.desired_linear_velocity = [0.7, 0, 0]
-            torque_optimizer.desired_angular_velocity = [0., 0., 0.]
+            lin_vel = to_torch([0., 0, 0], device=sim_conf.sim_device)
+            ang_vel = to_torch([0., 0, 0.5], device=sim_conf.sim_device)
+            torque_optimizer.desired_linear_velocity = torch.stack([lin_vel] * robot.num_envs, dim=0)
+            torque_optimizer.desired_angular_velocity = torch.stack([ang_vel] * robot.num_envs, dim=0)
 
-            motor_action, _, _, _, _ = torque_optimizer.get_action(
+            motor_action, desired_acc, solved_acc, _, _ = torque_optimizer.get_action(
                 gait_generator.desired_contact_state,
                 swing_foot_position=swing_leg_controller.desired_foot_positions)
             e = time.time()
+
+            energy_2d = energy_value_2d(state=torque_optimizer.tracking_error[:, 2:], p_mat=MATRIX_P)
 
             print(f"torque_optimizer.tracking_error: {torque_optimizer.tracking_error}")
             print(f"robot: {torque_optimizer._base_position_kp}")
@@ -230,6 +239,36 @@ def main(argv):
             print(f"robot: {torque_optimizer._base_orientation_kp}")
             print(f"robot: {torque_optimizer._base_orientation_kd}")
             print(f"duration is: {e - s}")
+
+            logs.append(
+                dict(timestamp=robot.time_since_reset,
+                     base_position=torch.clone(robot.base_position),
+                     base_orientation_rpy=torch.clone(robot.base_orientation_rpy),
+                     base_velocity=torch.clone(robot.base_velocity_body_frame),
+                     base_angular_velocity=torch.clone(robot.base_angular_velocity_body_frame),
+                     motor_positions=torch.clone(robot.motor_positions),
+                     motor_velocities=torch.clone(robot.motor_velocities),
+                     motor_action=motor_action,
+                     motor_torques=robot.motor_torques,
+                     # num_clips=self._num_clips,
+                     foot_contact_state=gait_generator.desired_contact_state,
+                     foot_contact_force=robot.foot_contact_forces,
+                     desired_swing_foot_position=swing_leg_controller.desired_foot_positions,
+                     desired_acc_body_frame=desired_acc,
+                     desired_vx=torque_optimizer.desired_linear_velocity[:, 0],
+                     desired_com_height=torque_optimizer.desired_base_position[:, 2],
+                     ha_action=desired_acc,
+                     hp_action=desired_acc,
+                     action_mode=ActionMode.TEACHER,
+                     acc_min=to_torch([-10, -10, -10, -20, -20, -20], device=sim_conf.sim_device),
+                     acc_max=to_torch([10, 10, 10, 20, 20, 20], device=sim_conf.sim_device),
+                     energy=to_torch(energy_2d, device=sim_conf.sim_device),
+                     solved_acc_body_frame=solved_acc,
+                     foot_positions_in_base_frame=robot.foot_positions_in_base_frame,
+                     # env_action=drl_action,
+                     # env_obs=torch.clone(self._obs_buf)
+                     ))
+
             robot.step(motor_action)
 
             steps_count += 1
@@ -238,6 +277,17 @@ def main(argv):
             robot.render()
 
         print("Wallclock time: {}".format(time.time() - start_time))
+
+        if FLAGS.save_traj:
+            mode = "real" if FLAGS.use_real_robot else "sim"
+            output_dir = (
+                f"eval_{mode}_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}.pkl")
+            # output_path = os.path.join(root_path, output_dir)
+            output_path = os.path.join(os.path.dirname(FLAGS.traj_dir), output_dir)
+
+            with open(output_path, "wb") as fh:
+                pickle.dump(logs, fh)
+            print(f"Data logged to: {output_path}")
 
 
 def add_uneven_terrains(gym, sim):

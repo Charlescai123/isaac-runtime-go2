@@ -33,7 +33,7 @@ def copysign(a, b):
 
 
 @torch.jit.script
-def get_euler_xyz_from_quaternion(q):
+def get_euler_zyx_from_quaternion(q):
     qx, qy, qz, qw = 0, 1, 2, 3
     # roll (x-axis rotation)
     sinr_cosp = 2.0 * (q[:, qw] * q[:, qx] + q[:, qy] * q[:, qz])
@@ -54,3 +54,57 @@ def get_euler_xyz_from_quaternion(q):
 
     return torch.stack(
         (roll % (2 * np.pi), pitch % (2 * np.pi), yaw % (2 * np.pi)), dim=1)
+
+
+if __name__ == '__main__':
+    # 示例四元数
+    q = torch.tensor([[0.0, 0.0, 0.707, 0.707]])  # 绕 Z 轴旋转 90 度
+    import math
+    import pybullet as p
+
+    roll = math.radians(30)  # 绕 X 轴旋转 30°
+    pitch = math.radians(45)  # 绕 Y 轴旋转 60°
+    yaw = math.radians(60)  # 绕 Z 轴旋转 90°
+
+    # 转换为四元数
+    quaternion = p.getQuaternionFromEuler([roll, pitch, yaw])
+    quaternion = torch.tensor([quaternion])
+    print(f"quaternion: {quaternion}")
+    import torch
+
+
+    def quaternion_to_euler_xyz(q):
+        """
+        从四元数计算 Euler XYZ。
+        :param q: 四元数张量，形状 [batch_size, 4] 或 [4]
+        :return: 欧拉角张量，形状 [batch_size, 3] 或 [3]
+        """
+        roll = torch.atan2(2 * (q[:, 3] * q[:, 0] + q[:, 1] * q[:, 2]),
+                           1 - 2 * (q[:, 0] ** 2 + q[:, 1] ** 2))
+        pitch = torch.asin(torch.clamp(2 * (q[:, 3] * q[:, 1] - q[:, 2] * q[:, 0]), -1.0, 1.0))
+        yaw = torch.atan2(2 * (q[:, 3] * q[:, 2] + q[:, 0] * q[:, 1]),
+                          1 - 2 * (q[:, 1] ** 2 + q[:, 2] ** 2))
+        return torch.stack((roll, pitch, yaw), dim=-1)
+
+
+    def quaternion_to_euler_zyx(q):
+        """
+        从四元数计算 Euler ZYX。
+        :param q: 四元数张量，形状 [batch_size, 4] 或 [4]
+        :return: 欧拉角张量，形状 [batch_size, 3] 或 [3]
+        """
+        yaw = torch.atan2(2 * (q[:, 3] * q[:, 2] + q[:, 0] * q[:, 1]),
+                          1 - 2 * (q[:, 1] ** 2 + q[:, 2] ** 2))
+        pitch = torch.asin(torch.clamp(-2 * (q[:, 0] * q[:, 2] - q[:, 3] * q[:, 1]), -1.0, 1.0))
+        roll = torch.atan2(2 * (q[:, 3] * q[:, 0] + q[:, 1] * q[:, 2]),
+                           1 - 2 * (q[:, 0] ** 2 + q[:, 2] ** 2))
+        return torch.stack((roll, pitch, yaw), dim=-1)
+
+
+    print(f"zyx: {quaternion_to_euler_zyx(quaternion)}")
+    print(f"xyz: {quaternion_to_euler_xyz(quaternion)}")
+
+    # 计算欧拉角
+    quaternion2 = torch.tensor([[0.7071, 0.7071, 0, 0]])
+    euler_angles = get_euler_zyx_from_quaternion(quaternion)
+    print("Euler Angles (roll, pitch, yaw):", euler_angles)

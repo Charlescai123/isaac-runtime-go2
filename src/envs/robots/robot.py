@@ -10,7 +10,7 @@ import ml_collections
 import torch
 
 from src.configs.defaults import asset_options as asset_options_config
-from src.envs.robots.utils.rotation_utils import quat_to_rot_mat, get_euler_xyz_from_quaternion
+from src.envs.robots.utils.rotation_utils import quat_to_rot_mat, get_euler_zyx_from_quaternion
 from src.envs.robots.modules.sensor.rgbd_camera import RGBDCamera
 from isaacgym.terrain_utils import *
 
@@ -52,9 +52,7 @@ class Robot:
         self._thigh_names = thigh_names
 
         self._scene_offset_x = 40  # start from a brighter place in chess plane
-        # init_positions[:, 0] = init_positions[:, 0] + self._scene_offset_x + 2  # Forward init pos
         init_positions[:, 0] = init_positions[:, 0] + self._scene_offset_x + 6  # (For testing)
-        # init_positions[:, 0] = init_positions[:, 0] + self._scene_offset_x - 2  # Backward init pos
 
         self._init_mpc_height = init_positions[:, 2]
         self._base_init_state = self._compute_base_init_state(init_positions)
@@ -76,26 +74,7 @@ class Robot:
         self._load_urdf(urdf_path)
         self._gym.prepare_sim(self._sim)
 
-        # # 初次渲染
-        # gym = self._gym
-        # gym.simulate(self._sim)
-        # gym.fetch_results(sim, True)
-        # gym.step_graphics(sim)
-        # gym.draw_viewer(self._viewer, sim, True)
-        #
-        # # 持续渲染
-        # while not gym.query_viewer_has_closed(self._viewer):
-        #     gym.simulate(sim)
-        #     gym.fetch_results(sim, True)
-        #     gym.step_graphics(sim)
-        #     gym.draw_viewer(self._viewer, sim, True)
-        #
-        # # 清理资源
-        # gym.destroy_viewer(self._viewer)
-        # gym.destroy_sim(sim)
-
         self._frames = []
-        # self._camera_handle = self.add_camera()
 
         self._init_buffers()
 
@@ -120,14 +99,9 @@ class Robot:
         """Computes desired init state for CoM (position and velocity)."""
         num_envs = init_positions.shape[0]
         init_state_list = [0., 0., 0.] + [0., 0., 0., 1.] + [0., 0., 0.] + [0., 0., 0.]
-        # init_state_list = [0., 0., 0.] + [0., 0., 0.7071, 0.7071] + [0., 0., 0.
-        #                                                      ] + [0., 0., 0.]
-        # init_state_list = [0., 0., 0.] + [ 0.0499792, 0, 0, 0.9987503
-        #                                       ] + [0., 0., 0.] + [0., 0., 0.]
         init_states = np.stack([init_state_list] * num_envs, axis=0)
         init_states = to_torch(init_states, device=self._device)
         init_states[:, :3] = init_positions
-        # init_states[:, :3] = 0.5
         return to_torch(init_states, device=self._device)
 
     def _cache_robot_rigid_body_indices(self):
@@ -195,12 +169,15 @@ class Robot:
         self._num_dof = self._gym.get_asset_dof_count(self._robot_asset)
         self._num_bodies = self._gym.get_asset_rigid_body_count(self._robot_asset)
 
-        spacing = 10.
-        env_lower = gymapi.Vec3(-spacing, -spacing, 0.)
-        env_upper = gymapi.Vec3(spacing, spacing, spacing)
+        spacing_x = 10.
+        spacing_y = 10.
+        spacing_z = 1.
+        env_lower = gymapi.Vec3(-spacing_x, -spacing_y, 0.)
+        env_upper = gymapi.Vec3(spacing_x, spacing_y, spacing_z)
         for i in range(self._num_envs):
-            env_handle = self._gym.create_env(self._sim, env_lower, env_upper,
-                                              int(np.sqrt(self._num_envs)))
+            env_handle = self._gym.create_env(self._sim, env_lower, env_upper, int(np.sqrt(self._num_envs)))
+            env_origin = self._gym.get_env_origin(env_handle)
+
             start_pose = gymapi.Transform()
             start_pose.p = gymapi.Vec3(*self._base_init_state[i, :3])
             # start_pose.r = gymapi.Quat(*self._base_init_state[i, 3:7])
@@ -212,11 +189,12 @@ class Robot:
                 sim=self._sim,
                 gym=self._gym,
                 viewer=self._viewer,
-                env_handle=env_handle
+                env_handle=env_handle,
+                transform=env_origin
             )
-
             # Add camera sensor
             camera_sensor = RGBDCamera(
+                robot=self,
                 sim=self._sim,
                 env=env_handle,
                 viewer=self._viewer,
@@ -229,9 +207,14 @@ class Robot:
             self._robot_actors.append(actor_handle)
             self._camera_sensors.append(camera_sensor)
 
+        # For each environment simulate their unnecessary dynamics after initial urdf loading
+        for world_env in self._world_envs:
+            world_env.simulate_irrelevant_dynamics()
+
         # Cache robot rigid body indices
         self._cache_robot_rigid_body_indices()
         self._num_rigid_body_per_env = self._gym.get_env_rigid_body_count(self._envs[0])
+        self._num_actor_per_env = self._gym.get_actor_count(self._envs[0])
 
     def set_foot_friction(self, friction_coef, env_id=0):
         rigid_shape_props = self._gym.get_actor_rigid_shape_properties(
@@ -265,55 +248,18 @@ class Robot:
         for i in range(len(self._envs)):
             index = self._gym.get_actor_index(self._envs[i], self._robot_actors[i], gymapi.DOMAIN_SIM)
             self._robot_actors_global_indices.append(index)
-
-            idx1 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[0],
-                                                        gymapi.DOMAIN_SIM)
-            idx2 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[1],
-                                                        gymapi.DOMAIN_SIM)
-            idx3 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[2],
-                                                        gymapi.DOMAIN_SIM)
-            idx4 = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], self._feet_indices[3],
-                                                        gymapi.DOMAIN_SIM)
-            print(f"idx1: {idx1}")
-            print(f"idx2: {idx2}")
-            print(f"idx3: {idx3}")
-            print(f"idx4: {idx4}")
-
             rigid_body_dict = self._gym.get_actor_rigid_body_dict(self._envs[i], self._robot_actors[i])
-            print(f"rigid_body_dict: {rigid_body_dict}")
             for v in sorted(rigid_body_dict.values()):
                 idx = self._gym.get_actor_rigid_body_index(self._envs[i], self._robot_actors[i], v, gymapi.DOMAIN_SIM)
                 self._robot_rigid_body_global_indices.append(idx)
 
         # Wrap all tensors
         actor_root_state = gymtorch.wrap_tensor(actor_root_state)
-        # actor_root_state_robot = gymtorch.wrap_tensor(actor_root_state_robot)
         dof_state_tensor = gymtorch.wrap_tensor(dof_state_tensor)
-        # net_contact_forces = gymtorch.wrap_tensor(net_contact_forces)
-        # rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
         net_contact_forces = gymtorch.wrap_tensor(net_contact_forces)
         rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)
         dof_force = gymtorch.wrap_tensor(dof_force)
         jacobians = gymtorch.wrap_tensor(jacobians)
-
-        # res = self._gym.get_actor_rigid_body_states(self._envs[i], self._robot_actors[i], gymapi.STATE_ALL)
-        # print(f"res: {res}")
-        # rigid_body_state.append(res)
-        # rigid_body_state = rigid_body_state.reshape(-1, 3)
-        # print(f"rigid_body_state: {to_torch(rigid_body_state, device=self._device).shape}")
-        print(f"self._robot_rigid_body_global_indices: {self._robot_rigid_body_global_indices}")
-        print(f"actor_root_state: {actor_root_state}")
-        print(f"actor_root_state.shape: {actor_root_state.shape}")
-        print(f"actor_root_state.type: {type(actor_root_state)}")
-        print(f"dof_state_tensor: {dof_state_tensor.shape}")
-        print(f"net_contact_forces: {net_contact_forces}")
-        print(f"net_contact_forces: {net_contact_forces.shape}")
-        print(f"rigid_body_state: {rigid_body_state}")
-        print(f"rigid_body_state: {rigid_body_state.shape}")
-        print(f"rigid_body_state: {rigid_body_state.dtype}")
-        print(f"dof_force: {dof_force.shape}")
-        print(f"jacobians: {jacobians.shape}")
-        # time.sleep(123)
 
         self._gym.refresh_actor_root_state_tensor(self._sim)
         self._gym.refresh_net_contact_force_tensor(self._sim)
@@ -326,9 +272,8 @@ class Robot:
         self._all_root_states = actor_root_state.clone()
         self._all_root_states[self._robot_actors_global_indices] = self._base_init_state
         self._root_states = actor_root_state[self._robot_actors_global_indices]
-        print(f"self._root_states: {self._root_states}")
 
-        self._dof_state = dof_state_tensor
+        self._dof_state = dof_state_tensor  # TODO: Here dof_state_tensor.clone() causes issue!!!
         self._rigid_body_state = rigid_body_state[:self._num_envs * self._num_rigid_body_per_env, :]
         self._motor_positions = self._dof_state.view(self._num_envs, self._num_dof, 2)[..., 0]
         self._motor_velocities = self._dof_state.view(self._num_envs, self._num_dof, 2)[..., 1]
@@ -349,22 +294,6 @@ class Robot:
                                 7:10]
         self._foot_positions = self._rigid_body_state.view(self._num_envs,
                                                            self._num_rigid_body_per_env, 13)[:, self._feet_indices, 0:3]
-        print(f"self._base_quat: {self._base_quat}")
-        print(f"self._base_rot_mat: {self._base_rot_mat}")
-        print(f"self._base_lin_vel_world: {self._base_lin_vel_world}")
-        print(f"self._base_ang_vel_world: {self._base_ang_vel_world}")
-
-        print(f"self._num_bodies: {self._num_bodies}")
-        # print(f"rigid_body_view: {self._rigid_body_state.view(self._num_envs, self._num_bodies, 13)}")
-        print(f"self._rigid_body_state: {self._rigid_body_state}")
-        print(f"self._feet_indices: {self._feet_indices}")
-        print(f"self._foot_positions: {self._foot_positions}")
-        print(f"self._foot_velocities: {self._foot_velocities}")
-        print(f"self._rigid_body_state: {self._rigid_body_state.shape}")
-        print(f"self._feet_indices: {self._feet_indices.shape}")
-        print(f"self._foot_positions: {self._foot_positions.shape}")
-        print(f"self._foot_velocities: {self._foot_velocities.shape}")
-        # time.sleep(123)
         # Other useful buffers
         self._torques = torch.zeros(self._num_envs,
                                     self._num_dof,
@@ -379,12 +308,12 @@ class Robot:
         if len(env_ids) == 0:
             return
 
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
-        # env_ids_int32 = torch.tensor([0, 1], dtype=torch.int32)
+        env_ids_int32 = self._num_actor_per_env * env_ids.to(dtype=torch.int32)
+
         self._time_since_reset[env_ids] = 0
         self._last_timestamp[env_ids] = 0
 
-        self._foot_positions_prev[env_ids, :] = self.foot_positions_in_base_frame.clone()
+        self._foot_positions_prev[env_ids, :] = self.foot_positions_in_base_frame[env_ids, :].clone()
         self._foot_positions_prev[env_ids, :, 2] = -(self._base_init_state[env_ids, 2].
                                                      repeat_interleave(4).reshape(-1, 4))
         # Reset root states:
@@ -392,13 +321,16 @@ class Robot:
         # self._root_states[env_ids] = self._base_init_state[env_ids]
         # print(f"self._root_states: {self._root_states}")
         # print(f"env_ids: {env_ids}")
-        self._gym.set_actor_root_state_tensor(
-            self._sim, gymtorch.unwrap_tensor(self._all_root_states)
-        )
-        # self._gym.set_actor_root_state_tensor_indexed(
-        #     self._sim, gymtorch.unwrap_tensor(self._root_states),
-        #     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32)
+        # self._gym.set_actor_root_state_tensor(
+        #     self._sim, gymtorch.unwrap_tensor(self._all_root_states)
         # )
+        self._gym.set_actor_root_state_tensor_indexed(
+            self._sim,
+            gymtorch.unwrap_tensor(self._all_root_states),
+            gymtorch.unwrap_tensor(env_ids_int32),
+            len(env_ids_int32)
+        )
+
         # Reset dofs
         self._motor_positions[env_ids] = to_torch(self._init_motor_angles,
                                                   device=self._device,
@@ -413,7 +345,6 @@ class Robot:
             self._gym.simulate(self._sim)
 
         self._post_physics_step()
-        # time.sleep(123)
 
     def step(self, action):
         for _ in range(self._sim_config.action_repeat):
@@ -427,7 +358,6 @@ class Robot:
             self._gym.fetch_results(self._sim, True)
             self._gym.refresh_dof_state_tensor(self._sim)
 
-
             # self._update_foot_positions()  # Update foot positions
             self._time_since_reset += self._sim_config.sim_params.dt
             # self._state_estimator.update_ground_normal_vec()
@@ -437,6 +367,7 @@ class Robot:
             #     self._num_envs, 1)
 
         self._post_physics_step()
+
     def _post_physics_step(self):
         # Refresh all tensors
         self._gym.refresh_actor_root_state_tensor(self._sim)
@@ -454,14 +385,11 @@ class Robot:
 
         # Update robot actor root state and rigid_body_state
         self._root_states = actor_root_state[self._robot_actors_global_indices]
-        # self._rigid_body_state = rigid_body_state
+        self._rigid_body_state = rigid_body_state
 
         self._base_quat[:] = self._root_states[:self._num_envs, 3:7]
         self._base_rot_mat = quat_to_rot_mat(self._base_quat)
         self._base_rot_mat_t = torch.transpose(self._base_rot_mat, 1, 2)
-        # print(f"self._base_rot_mat: {self._base_rot_mat}")
-        # print(f"self._base_rot_mat_t: {self._base_rot_mat_t}")
-        # time.sleep(123)
         self._base_lin_vel_world = self._root_states[:self._num_envs, 7:10]
         self._base_ang_vel_world = self._root_states[:self._num_envs, 10:13]
         self._projected_gravity[:] = torch.bmm(self._base_rot_mat_t, self._gravity_vec[:, :, None])[:, :, 0]
@@ -470,11 +398,11 @@ class Robot:
                                 7:10]
         self._foot_positions = self._rigid_body_state.view(self._num_envs,
                                                            self._num_rigid_body_per_env, 13)[:, self._feet_indices, 0:3]
-        print("*******************************************************************************")
-        print(f"actor_root_state: {self._root_states}")
-        print(f"self._foot_positions: {self._foot_positions}")
-        print(f"self._foot_velocities: {self._foot_velocities}")
-        print("*******************************************************************************")
+        # print("*******************************************************************************")
+        # print(f"actor_root_state: {self._root_states}")
+        # print(f"self._foot_positions: {self._foot_positions}")
+        # print(f"self._foot_velocities: {self._foot_velocities}")
+        # print("*******************************************************************************")
 
         # print(f"foot_positions: {self._foot_positions}")
         # _foot_pos = torch.zeros_like(self._foot_positions)
@@ -528,7 +456,7 @@ class Robot:
     @property
     def base_orientation_rpy(self):
         return angle_normalize(
-            get_euler_xyz_from_quaternion(self._root_states[:self._num_envs, 3:7]))
+            get_euler_zyx_from_quaternion(self._root_states[:self._num_envs, 3:7]))
 
     @property
     def base_orientation_quat(self):
@@ -645,7 +573,6 @@ class Robot:
         # print(f"rot_mat_t: {rot_mat_t}")
         # print(f"self._jacobian: {self._jacobian}")
         # print(f"self._jacobian: {self._jacobian.shape}")
-        # time.sleep(123)
         jacobian = torch.zeros((self._num_envs, 12, 12), device=self._device)
         jacobian[:, :3, :3] = torch.bmm(rot_mat_t, self._jacobian[:, 4, :3, 6:9])
         jacobian[:, 3:6, 3:6] = torch.bmm(rot_mat_t, self._jacobian[:, 8, :3, 9:12])
@@ -660,6 +587,10 @@ class Robot:
     @property
     def motor_group(self):
         return self._motors
+
+    @property
+    def env_handles(self):
+        return self._envs
 
     @property
     def num_envs(self):
@@ -680,6 +611,10 @@ class Robot:
     @property
     def control_timestep(self):
         return self._sim_config.dt * self._sim_config.action_repeat
+
+    @property
+    def camera_sensor(self):
+        return self._camera_sensors
 
     def subscribe_viewer_keyboard_event(self):
         # self._gym.subscribe_viewer_keyboard_event(self._viewer, gymapi.KEY_ESCAPE, "QUIT")
@@ -714,14 +649,14 @@ class Robot:
                 if not self.free_cam:
                     for i in range(9):
                         if evt.action == "lookat" + str(i) and evt.value > 0:
-                            self.lookat(i)
+                            # self.lookat(i)
                             self.lookat_id = i
                     if evt.action == "prev_id" and evt.value > 0:
                         self.lookat_id = (self.lookat_id - 1) % self.num_envs
-                        self.lookat(self.lookat_id)
+                        # self.lookat(self.lookat_id)
                     if evt.action == "next_id" and evt.value > 0:
                         self.lookat_id = (self.lookat_id + 1) % self.num_envs
-                        self.lookat(self.lookat_id)
+                        # self.lookat(self.lookat_id)
                     if evt.action == "vx_plus" and evt.value > 0:
                         self.commands[self.lookat_id, 0] += 0.2
                     if evt.action == "vx_minus" and evt.value > 0:
@@ -768,14 +703,8 @@ class Robot:
 
             self._gym.poll_viewer_events(self._viewer)
 
-            # Get point cloud data
-            s = time.time()
-            # self._camera_sensors[0].get_pcd()
-            e = time.time()
-            print(f"get pcd time: {e - s}")
-
             # Record a video or not
             if self.record_video:
-                # _depth_img = self._camera_sensors[0].get_current_frame()
-                # self._frames.append(_depth_img)
+                _depth_img = self._camera_sensors[0].get_current_frame()
+                self._frames.append(_depth_img)
                 pass

@@ -92,7 +92,6 @@ class OffPolicyRunner:
                 prev_obs, obs, critic_obs, rewards, dones = prev_obs.to(self.device), obs.to(
                     self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                 # self.alg.process_env_step(rewards, dones, infos)
-                print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
                 print(f"rewards: {rewards}")
                 print(f"rewards: {rewards.shape}")
                 transitions_list.append(

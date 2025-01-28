@@ -16,6 +16,7 @@ corl_ckpts/
 
 # Distribution / packaging
 .Python
+data/
 build/
 debug/
 develop-eggs/

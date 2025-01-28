@@ -67,12 +67,12 @@ def compute_desired_foot_positions(
     # Mid-air position
     mid_position = torch.clone(hip_position)
     mid_position[..., 2] = (-base_height[:, None] + foot_height)
-    print("____________________________________________________________")
-    print(f"hip_position: {hip_position}")
-    print(f"mid_position: {mid_position}")
-    print(f"base_height: {base_height}")
-    print(f"foot_height: {foot_height}")
-    print("____________________________________________________________")
+    # print("____________________________________________________________")
+    # print(f"hip_position: {hip_position}")
+    # print(f"mid_position: {mid_position}")
+    # print(f"base_height: {base_height}")
+    # print(f"foot_height: {foot_height}")
+    # print("____________________________________________________________")
     # / projected_gravity[:, 2])[:, None]
 
     # Land position
@@ -199,6 +199,7 @@ class RaibertSwingLegController:
             self._gait_generator.normalized_phase,
             self._phase_switch_foot_positions,
         )
-        # print(f"desired_foot_pos: {desired_foot_pos}")
+
+        # print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!desired_foot_pos: {desired_foot_pos}")
 
         return desired_foot_pos

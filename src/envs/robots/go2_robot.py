@@ -34,11 +34,10 @@ class Go2Robot(go2.Go2):
         if viewer is not None:
             raise ValueError("Cannot enable GUI for real robot.")
 
-        self._raw_state = go1_interface.LowState()
+        self._raw_state = go2_interface.LowState()
         self._contact_force_threshold = np.zeros(4)
-        self._robot_interface = go1_interface.RobotInterface(0xff)
-        self._state_estimator = state_estimator.StateEstimator(
-            self, use_external_contact_estimator=False)
+        self._robot_interface = go2_interface.RobotInterface(0xff)
+        self._state_estimator = state_estimator.StateEstimator(self, use_external_contact_estimator=False)
         self._last_reset_time = time.time()
         self._motor_control_mode = motor_control_mode
         self._foot_contact_force_histories = [[], [], [], []]

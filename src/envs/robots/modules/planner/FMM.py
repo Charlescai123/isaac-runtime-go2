@@ -1,4 +1,5 @@
 "https://github.com/MarkFzp/navigation-locomotion/blob/main/plan_cts/fmm.py"
+import time
 
 import numpy as np
 from numpy.core.fromnumeric import mean
@@ -34,23 +35,41 @@ def get_dist(sx, sy, step_size):
 
 
 class FMMPlanner:
-    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=20, obstacle_dist_ratio=1.):
+    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=6, obstacle_dist_ratio=.2,
+                 resolution=0.03):
         self.traversable = traversable
         self.fmm_dist = None
         self.add_obstacle_dist = add_obstacle_dist
         self.obstacle_dist_cap = obstacle_dist_cap
         self.obstacle_dist_ratio = obstacle_dist_ratio
         self.large_value = 1e10
-        self.resolution = 0.03
+        self.resolution = resolution
         self.grid_offset = np.array([0.5, 0.5])
         self.fovs = np.linspace(-0.5, 0.5, num=5)
         self.small_fovs = np.linspace(-0.2, 0.2, num=5)
         self.speeds = np.arange(0.05, 0.95, 0.05) / self.resolution
         self.conservative_step_size_factor = 0.9
+
+        self.robot_size = 0.27 / self.resolution
+        # assert (self.robot_size % 2 == 1)
+        self.half_robot_size = int(self.robot_size / 2)
         # self.step_sizes = np.array([10, 16, 22, 28]) # 0.3, 0.48, 0.66, 0.84
-        # self.vels = self._sample_velocity()
+        # self.vels =X self._sample_velocity()
+
+    def preprocess_map(self, map, use_config_space, use_gaussian_filter=False):
+
+        map = (map < 50)
+        if use_config_space:
+            y_size, x_size = map.shape
+            padded_map = np.pad(map, self.half_robot_size, 'constant', constant_values=1)
+            map = np.min(np.stack(
+                [padded_map[y: y + y_size, x: x + x_size] for y in range(self.half_robot_size * 2) for x in
+                 range(self.half_robot_size * 2)], axis=-1), axis=-1)
+
+        return map
 
     def set_goal(self, goal, auto_improve=False, dx=0.1):
+        """Traversable is a binary map with 0-obstacle and 1-free space"""
         traversable_ma = ma.masked_values(self.traversable, 0)
         goal_y, goal_x = int(goal[0]), int(goal[1])
 
@@ -58,8 +77,12 @@ class FMMPlanner:
             goal_y, goal_x = self._find_nearest_goal([goal_y, goal_x])
 
         traversable_ma[goal_y, goal_x] = 0
-        dd = skfmm.distance(traversable_ma, dx=dx)
-        # dd = ma.filled(dd, self.large_value)
+
+        # For skfmm.distance, 0 should be the goal points (zero-contour) and all values greater than zero are
+        # free space with given distance > 0, all values less than zero are also free space with given distance < 0
+        masked_distance_map = skfmm.distance(traversable_ma, dx=self.resolution)  # Distance map with the obstacle mask
+
+        dd = ma.filled(masked_distance_map, self.large_value)  # Replace the mask with large value
 
         if self.add_obstacle_dist:
             helper_planner = FMMPlanner(self.traversable, add_obstacle_dist=False)
@@ -69,13 +92,13 @@ class FMMPlanner:
 
         self.fmm_dist = dd
 
-        return dd
+        return dd, masked_distance_map
 
     def set_multi_goal(self, goal_map):
         traversable_ma = ma.masked_values(self.traversable, 0)
         traversable_ma[goal_map == 1] = 0
         dd = skfmm.distance(traversable_ma,
-                            dx=1)  # add_obstacle_dist: outputs a nd array (not masked), with 0 at obstacles
+                            dx=0.1)  # add_obstacle_dist: outputs a nd array (not masked), with 0 at obstacles
         dd = ma.filled(dd, self.large_value)  # add_obstacle_dist: no effect
         self.fmm_dist = dd
         return dd
@@ -93,13 +116,14 @@ class FMMPlanner:
     def get_short_term_goal(self, pos, yaw, lin_speed):
         pos_int = [int(x) for x in pos]
 
-        if self.fmm_dist[pos_int[0], pos_int[1]] < 0.25 / self.resolution:  # 25cm
+        if self.fmm_dist[pos_int[0], pos_int[1]] < 0.25 / self.resolution:  # 0.25 m
             stop = True
         else:
             stop = False
 
         # step_sizes = (lin_speed + self.speeds) / 2 * self.conservative_step_size_factor
-        step_sizes = (lin_speed + np.linspace(np.maximum(lin_speed - 0.4, 0.05), np.minimum(lin_speed + 0.4, 0.95),
+        step_sizes = (lin_speed + np.linspace(np.maximum(lin_speed - 0.4, 0.05),
+                                              np.minimum(lin_speed + 0.4, 0.95),
                                               num=10) / self.resolution) / 2  # [n_step]
         # print('speed: ', lin_speed)
         # print(step_sizes)
@@ -140,9 +164,13 @@ class FMMPlanner:
     def find_argmin_traj(self, pos_trajs):
         T = pos_trajs.shape[1]
         flat_pos_trajs = pos_trajs.reshape(-1, 2)
+        # flat_pos_trajs = flat_pos_trajs[::-1]
         fmm_values = self.get_fmm_value(flat_pos_trajs)
         traj_cost = fmm_values.reshape(-1, T)
         argmin_idx = np.argmin(np.sum(traj_cost, axis=-1))
+        print(f"fmm_values: {fmm_values}")
+        print(f"argmin_idx: {argmin_idx}")
+        # time.sleep(123)
 
         return argmin_idx
 
@@ -163,55 +191,3 @@ class FMMPlanner:
         goal = np.unravel_index(dist_map.argmin(), dist_map.shape)
 
         return goal
-
-
-class Spline:
-    def __init__(self, eval_interval=0.05, control_interval=0.05) -> None:
-        self.T_func = lambda ts: np.stack([ts ** 3, ts ** 2, ts, np.full(ts.shape, 1)], axis=1)[np.newaxis, :,
-                                 np.newaxis, :]
-        self.T_dot_func = lambda ts: np.stack([3 * ts ** 2, 2 * ts, np.full(ts.shape, 1), np.full(ts.shape, 0)],
-                                              axis=1)[np.newaxis, :, np.newaxis, :]
-        self.T_ddot_func = lambda ts: np.stack(
-            [6 * ts, np.full(ts.shape, 2), np.full(ts.shape, 0), np.full(ts.shape, 0)], axis=1)[np.newaxis, :,
-                                      np.newaxis, :]
-
-        self.ts_eval = np.arange(0, 1.5 + eval_interval, eval_interval)
-        self.T_eval = self.T_func(self.ts_eval)
-        self.T_dot_eval = self.T_dot_func(self.ts_eval)
-        self.T_ddot_eval = self.T_ddot_func(self.ts_eval)
-
-        self.ts_control = np.arange(control_interval, 1 + control_interval, control_interval)
-        self.T_control = self.T_func(self.ts_control)
-        self.T_dot_control = self.T_dot_func(self.ts_control)
-        self.T_ddot_control = self.T_ddot_func(self.ts_control)
-
-        self.M = np.array([[2, -2, 1, 1], [-3, 3, -2, -1], [0, 0, 1, 0], [1, 0, 0, 0]])
-
-    def fit_eval(self, start_pts, end_pts, start_grads, end_grads):
-        G = np.stack([start_pts, end_pts, start_grads, end_grads], axis=1)  # [N, 4, 2]
-        MG = (self.M @ G)[:, np.newaxis, :, :]  # [N, T, 4, 2]
-        pos = (self.T_eval @ MG).squeeze(axis=2)
-        return pos
-
-    def fit_reference(self, start_pts, end_pts, start_grads, end_grads):
-        G = np.stack([start_pts, end_pts, start_grads, end_grads], axis=0)  # [4, 2]
-        MG = (self.M @ G)[np.newaxis, np.newaxis, :, :]  # [4, 2]
-
-        # in y, x
-        # self.T_control @ MG outputs [1, T, 1, 2]
-        pos = (self.T_control @ MG).squeeze()  # [T, 2]
-        xy_dot = (self.T_dot_control @ MG).squeeze()
-        xy_ddot = (self.T_ddot_control @ MG).squeeze()
-
-        ang = np.arctan2(xy_dot[:, 0], xy_dot[:, 1])
-        lin_speed = np.linalg.norm(xy_dot, ord=2, axis=-1)
-
-        y_dot, x_dot = xy_dot[:, 0], xy_dot[:, 1]
-        y_ddot, x_ddot = xy_ddot[:, 0], xy_ddot[:, 1]
-
-        ang_speed = (x_dot * y_ddot - y_dot * x_ddot) / lin_speed ** 2
-
-        xs = np.stack([pos[:, 1], pos[:, 0], ang], axis=-1)
-        us = np.stack([lin_speed, ang_speed], axis=-1)[: -1]
-
-        return xs, us

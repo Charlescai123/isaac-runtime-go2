@@ -1,0 +1,47 @@
+# @package hp_student
+
+# DDPG agents
+agents:
+  # Actions
+  action:
+    add_noise: null    # None or OU noise
+    noise_factor: 1
+    noise_half_decay_time: 1e6
+    bound: [ -1, 1 ]
+#    magnitude: [ 3, 3, 3, 2, 2, 2 ]    # 6 dims
+#    magnitude: [ 80, 80, 80, 80, 80, 80 ]    # 6 dims
+#    magnitude: [ 4, 4, 4, 8, 8, 4 ]    # 6 dims
+    magnitude: [ 4, 4, 2, 8, 8, 4 ]    # 6 dims
+
+  # Actor-Critic
+  initial_loss: 100
+  soft_alpha: 0.005
+  learning_rate_actor: 0.0003
+  learning_rate_critic: 0.0003
+  add_target_action_noise: true
+  gamma_discount: 0.9
+  model_path: 0
+  training_by_steps: 0
+  max_training_steps: 0
+  max_training_episodes: 0
+  max_steps_per_episode: 0
+  evaluation_period: 0
+  max_evaluation_steps: 0
+  use_taylor_nn: false
+  taylor_editing: false
+  iteration_times: 3
+
+  # Reset
+  random_reset:
+    train: false
+    eval: false
+
+  # Replay buffer
+  replay_buffer:
+    batch_size: 512
+    buffer_size: 1e6
+    experience_prefill_size: 512
+
+  # Checkpoint
+  checkpoint: 'logs/train/pretrained_policy'
+

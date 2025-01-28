@@ -3,8 +3,11 @@ import copy
 import time
 import traceback
 
+import ml_collections
 import numpy as np
 import cvxpy as cp
+import torch
+from isaacgym.torch_utils import to_torch
 
 from omegaconf import DictConfig
 from numpy.linalg import pinv
@@ -18,98 +21,80 @@ np.set_printoptions(suppress=True)
 class HATeacher:
     """Monitors the safety-critical systems in all envs"""
 
-    def __init__(self, num_envs, teacher_cfg: DictConfig):
+    def __init__(self, num_envs, teacher_cfg: ml_collections.ConfigDict(), device):
+        self._device = device
         self._num_envs = num_envs
 
         # Teacher Configure
-        self.chi = np.array([teacher_cfg.chi] * self._num_envs)
-        self.epsilon = np.array([teacher_cfg.epsilon] * self._num_envs)
-        self.max_dwell_steps = np.array([teacher_cfg.tau] * self._num_envs)
-        self.teacher_enable = np.array([teacher_cfg.teacher_enable] * self._num_envs)
-        self.teacher_learn = np.array([teacher_cfg.teacher_learn] * self._num_envs)
+        self.chi = torch.full((self._num_envs,), teacher_cfg.chi, dtype=torch.float32, device=device)
+        self.epsilon = torch.full((self._num_envs,), teacher_cfg.epsilon, dtype=torch.float32, device=device)
+        self.max_dwell_steps = torch.full((self._num_envs,), teacher_cfg.tau, dtype=torch.int64, device=device)
+        self.teacher_enable = torch.full((self._num_envs,), teacher_cfg.enable, dtype=torch.bool, device=device)
+        self.teacher_correct = torch.full((self._num_envs,), teacher_cfg.correct, dtype=torch.bool, device=device)
+
         self.cvxpy_solver = teacher_cfg.cvxpy_solver
-        self.p_mat = MATRIX_P
+        self.p_mat = to_torch(MATRIX_P, device=device)
 
         # HAC Runtime
-        self._plant_state = np.array([None] * self._num_envs)
-        self._teacher_activate = np.array([False] * self._num_envs)
-        self._patch_center = np.zeros((self._num_envs, 12))
-        self._center_update = np.array([True] * self._num_envs)  # Patch center update flag
-        self._dwell_step = np.zeros(self._num_envs)  # Dwell step
+        self._plant_state = [None] * self._num_envs
+        self._teacher_activate = torch.full((self._num_envs,), False, dtype=torch.bool, device=device)
+        self._patch_center = torch.zeros((self._num_envs, 12), dtype=torch.float32, device=device)
+        self._center_update = torch.full((self._num_envs,), True, dtype=torch.bool, device=device)
+        self._dwell_step = torch.zeros(self._num_envs, dtype=torch.float32, device=device)
         _patch_interval = 5
-        self.patch_interval = np.array([_patch_interval] * self._num_envs)
-        _apply_realtime_patch = True
-        self.apply_realtime_patch = np.array([_apply_realtime_patch] * self._num_envs)
+        self.patch_interval = torch.full((self._num_envs,), _patch_interval, dtype=torch.int64, device=device)
+        _apply_rt_patch = True  #
+        self.apply_realtime_patch = torch.full((self._num_envs,), _apply_rt_patch, dtype=torch.bool, device=device)
 
         # Patch kp and kd
-        # self._default_kp = np.diag((0., 0., 100., 100., 100., 0.))
-        # self._default_kd = np.diag((40., 30., 10., 10., 10., 30.))
-        self._default_kp = np.array([[-0., -0., -0., -0., -0., -0.],
+        # self._default_kp = torch.diag(to_torch([0., 0., 50., 50., 50., 0.], device=device))
+        # self._default_kd = torch.diag(to_torch([10., 10., 10., 10., 10., 10.], device=device))
+        self._default_kp = to_torch([[-0., -0., -0., -0., -0., -0.],
                                      [-0., -0., -0., -0., -0., -0.],
                                      [-0., -0., 296., 0., - 0., 0.],
                                      [-0., -0., - 0., 200., 0, 0],
                                      [-0., -0., 0., 0, 200, 0],
-                                     [-0., -0., 0., 0, -0., 194]])
-        self._default_kd = np.array([[31., 0., 0., -0., 0., 0.],
+                                     [-0., -0., 0., 0, -0., 194]], device=device)
+        self._default_kd = to_torch([[31., 0., 0., -0., 0., 0.],
                                      [0., 13., -0., 0., -0, 0.],
                                      [0., -0., 28., 0., -0., 0.],
                                      [0., 0., -0., 26, 0., 0.],
                                      [-0., 0., 0., -0., 26., -0.],
-                                     [0., 0., 0., 0., -0., 25.]])
-        # self._default_kp = np.diag((0, 0, 100, 100, 100, 0))
-        # self._default_kd = np.diag((20, 20, 20, 20, 20, 20,))
+                                     [0., 0., 0., 0., -0., 25.]], device=device)
 
-        self._patch_kp = np.array([self._default_kp] * self._num_envs)
-        self._patch_kd = np.array([self._default_kd] * self._num_envs)
+        self._patch_kp = torch.stack([to_torch(self._default_kp, device=self._device)] * self._num_envs, dim=0)
+        self._patch_kd = torch.stack([to_torch(self._default_kd, device=self._device)] * self._num_envs, dim=0)
 
-        # self.action_counter = 0
-        self.action_counter = np.zeros(self._num_envs)
+        self.action_counter = torch.zeros(self._num_envs, dtype=torch.int, device=device)
 
-    def update(self, error_state: np.ndarray):
+    def update(self, error_state: torch.Tensor):
         """
         Update real-time plant and corresponding patch center if state is unsafe (error_state is 2d)
         """
-        # print(f"error_state: {error_state}")
-        # print(f"self._patch_center: {self._patch_center}")
 
         self._plant_state = error_state
-        energy_2d = energy_value_2d(state=error_state[:, 2:], p_mat=MATRIX_P)
-        print(f"energy: {energy_2d}")
+        energy_2d = energy_value_2d(state=error_state[:, 2:], p_mat=to_torch(MATRIX_P, device=self._device))
 
         # Find objects that need to be deactivated
         to_deactivate = (self._dwell_step >= self.max_dwell_steps) & self._teacher_activate
-        print(f"to_deactivate: {to_deactivate}")
-        if np.any(to_deactivate):
-            indices = np.argwhere(to_deactivate)
+        if torch.any(to_deactivate):
+            indices = torch.argwhere(to_deactivate)
             for idx in indices:
                 print(f"Reaching maximum dwell steps at index {int(idx)}, deactivate HA-Teacher")
             self._teacher_activate[to_deactivate] = False
 
         # Find objects that need to be activated
         to_activate = (energy_2d >= self.epsilon) & (~self._teacher_activate)
-        print(f"to_activate: {to_activate}")
-        if np.any(to_activate):
-            indices = np.argwhere(to_activate)
+        if torch.any(to_activate):
+            indices = torch.argwhere(to_activate)
             for idx in indices:
                 self._dwell_step[idx] = 0
                 self._teacher_activate[idx] = True  # Activate teacher
                 self._patch_center[tuple(idx)] = self._plant_state[tuple(idx)] * self.chi[tuple(idx)]
                 print(f"Activate HA-Teacher at {int(idx)} with new patch center: {self._patch_center[tuple(idx)]}")
 
-        # # HA-Teacher activated
-        # if self._teacher_activate:
-        #     if self._dwell_step >= self.max_dwell_steps:
-        #         print(f"Reaching maximum dwell steps, deactivate HA-Teacher")
-        #         self._teacher_activate = False
-
-        # HA-Teacher deactivated
-        # else:
-        #     # Outside envelope boundary
-        #     if energy >= self.epsilon:
-        #         self._dwell_step = 0
-        #         self._teacher_activate = True  # Activate teacher
-        #         self._patch_center = self._plant_state * self.chi  # Update patch center
-        #         print(f"Activate HA-Teacher and updated patch center is: {self._patch_center}")
+        # print(f"self._plant_state: {self._plant_state}")
+        # print(f"self._patch_center: {self._patch_center}")
 
         return energy_2d
 
@@ -119,24 +104,24 @@ class HATeacher:
         """
         self.action_counter += 1
 
-        actions = np.zeros((self._num_envs, 6))
-        dwell_flags = np.full(self._num_envs, False)
+        actions = torch.zeros((self._num_envs, 6), dtype=torch.float32, device=self._device)
+        dwell_flags = torch.full((self._num_envs,), False, dtype=torch.bool, device=self._device)
 
         # If All HA-Teacher disabled
-        if not np.any(self.teacher_enable):
+        if not torch.any(self.teacher_enable):
             print("All HA-teachers are disabled")
             return actions, dwell_flags
 
         # If All HA-Teacher deactivated
-        if not np.any(self._teacher_activate):
+        if not torch.any(self._teacher_activate):
             print("All teachers are deactivated")
             return actions, dwell_flags
 
         # Find the object that needs to be patched
         to_patch = self.apply_realtime_patch & (self.action_counter % self.patch_interval == 0)
-        print(f"to_patch: {to_patch}")
-        if np.any(to_patch):
-            indices = np.argwhere(to_patch)
+        # print(f"to_patch: {to_patch}")
+        if torch.any(to_patch):
+            indices = torch.argwhere(to_patch)
             for idx in indices:
                 print(f"Applying realtime patch at index {int(idx)}")
                 self.realtime_patch(int(idx))
@@ -145,22 +130,21 @@ class HATeacher:
 
         # Find objects with HA-Teacher enabled and activated
         ha_alive = self.teacher_enable & self._teacher_activate
-        indices = np.argwhere(ha_alive)
+        indices = torch.argwhere(ha_alive)
         if indices.size == 0:
             raise RuntimeError("ha_alive contains no True values, indices is empty. Check the code please")
 
         # Set dwell flag for them
         dwell_flags[indices] = True
 
-        kp_mul_term = (self._plant_state[indices, :6] - self._patch_center[indices, :6]) * -1
-        kd_mul_term = (self._plant_state[indices, 6:] - self._patch_center[indices, 6:]) * -1
-        # print(f"kp_mul_term: {kp_mul_term}")
-        # print(f"kd_mul_term: {kd_mul_term}")
+        kp_mul_term = (self._plant_state[indices, :6] - self._patch_center[indices, :6])
+        kd_mul_term = (self._plant_state[indices, 6:] - self._patch_center[indices, 6:])
 
-        actions[indices.flatten()] = np.squeeze(self._patch_kp[indices] @ kp_mul_term[..., np.newaxis]
-                                                + self._patch_kd[indices] @ kd_mul_term[..., np.newaxis])
+        # res = self._patch_kp[indices] @ kp_mul_term.unsqueeze(-1) + self._patch_kd[indices] @ kd_mul_term.unsqueeze(-1)
+        actions[indices.flatten()] = torch.squeeze(self._patch_kp[indices] @ kp_mul_term.unsqueeze(-1) +
+                                                   self._patch_kd[indices] @ kd_mul_term.unsqueeze(-1))
 
-        assert np.all(self._dwell_step <= self.max_dwell_steps)
+        assert torch.all(self._dwell_step <= self.max_dwell_steps)
 
         for idx in indices:
             self._dwell_step[idx] += 1
@@ -170,24 +154,17 @@ class HATeacher:
         return actions, dwell_flags
 
     def realtime_patch(self, idx):
-        s = time.time()
         roll, pitch, yaw = self._plant_state[idx, 3:6]
-        # roll_1d, pitch_1d, yaw_1d = self._plant_state[idx, 3:6]
-        # roll = roll.numpy()
-        # pitch = pitch.numpy()
-        # yaw = yaw.numpy()
-        self._patch_kp[idx, :], self._patch_kd[idx, :] = self.system_patch(roll=roll, pitch=pitch, yaw=yaw)
-        # self._patch_kp, self._patch_kd = self.system_patch_2d(roll_1d=roll_1d, pitch_1d=pitch_1d, yaw_1d=yaw_1d)
+        self._patch_kp[idx, :], self._patch_kd[idx, :] = self.system_patch(roll=roll.cpu(), pitch=pitch.cpu(),
+                                                                           yaw=yaw.cpu(),
+                                                                           device=self._device)
         e = time.time()
-        print(f"roll pitch yaw: {roll}, {pitch}, {yaw}")
-        print(f"self._patch_kp: {self._patch_kp}")
-        print(f"self._patch_kd: {self._patch_kd}")
-        print(f"patch time: {e - s}")
+        # print(f"patch time: {e - s}")
 
     # from numba import njit, jit
     @staticmethod
     # @tf.function
-    def system_patch(roll, pitch, yaw):
+    def system_patch(roll, pitch, yaw, device="cuda:0"):
         """
          Computes the patch gain with roll pitch yaw.
 
@@ -195,6 +172,7 @@ class HATeacher:
            roll: Roll angle (rad).
            pitch: Pitch angle (rad).
            yaw: Yaw angle (rad).
+           device: device to torch tensor
 
          Returns:
            F_kp: Proportional feedback gain matrix.
@@ -319,19 +297,17 @@ class HATeacher:
         # Compute F_kd
         F_kd = -aF[4:10, 4:10]
 
-        print(f"Solved F_kp is: {F_kp}")
-        print(f"Solved F_kd is: {F_kd}")
+        # print(f"Solved F_kp is: {F_kp}")
+        # print(f"Solved F_kd is: {F_kd}")
 
         # Check if the problem is solved successfully
         if np.all(np.linalg.eigvals(P) > 0):
             print("LMIs feasible")
-            print(F_kp)
-            print(F_kd)
-
         else:
             print("LMIs infeasible")
 
-        return F_kp, F_kd
+        return (to_torch(F_kp, device=device),
+                to_torch(F_kd, device=device))
 
     def system_patch_2d(self, roll_1d, pitch_1d, yaw_1d):
         kp, kd = [], []
@@ -341,6 +317,10 @@ class HATeacher:
             kp.append(_kp)
             kd.append(_kd)
         return np.asarray(kp), np.asarray(kd)
+
+    @property
+    def device(self):
+        return self._device
 
     @property
     def plant_state(self):

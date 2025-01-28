@@ -14,7 +14,7 @@ import time
 
 from isaacgym.terrain_utils import *
 from src.envs import env_wrappers
-from src.envs.robots.modules.planner.bev_utils import *
+from src.envs.robots.modules.sensor.bev_utils import *
 from rsl_rl.runners import OnPolicyRunner
 import torch
 import yaml

@@ -29,6 +29,48 @@ class MotorCommand:
     desired_extra_torque: torch.Tensor = torch.zeros(12)
 
 
+def concatenate_motor_actions(command1: MotorCommand,
+                              command2: MotorCommand,
+                              indices1: torch.Tensor,
+                              indices2: torch.Tensor
+                              ):
+    """Concatenate two groups of motor commands.
+    Here we assume that kp, kd of the motor groups remain the same, but other factors like
+    desired_position, desired_velocity and desired_extra_torque
+    """
+    if command1 is None and command2 is None:
+        raise RuntimeError("Both motor commands are None, cannot concatenate.")
+
+    if command1 is None or command2 is None:
+        return command1 if command2 is None else command2
+
+    device = command1.desired_position.device
+    num_robots = len(indices1) + len(indices2)
+    num_motors = command1.desired_position.shape[1]
+
+    # Ultimate motor command
+    cmd = MotorCommand
+    cmd.kp = command1.kp
+    cmd.kp = command1.kd
+    cmd.desired_position = torch.zeros((num_robots, num_motors), device=device)
+    cmd.desired_velocity = torch.zeros((num_robots, num_motors), device=device)
+    cmd.desired_extra_torque = torch.zeros((num_robots, num_motors), device=device)
+
+    # Concatenate the desired_position
+    cmd.desired_position = cmd.desired_position.index_put_((indices1,), command1.desired_position)
+    cmd.desired_position = cmd.desired_position.index_put_((indices2,), command2.desired_position)
+
+    # Concatenate the desired_velocity
+    cmd.desired_velocity = cmd.desired_position.index_put_((indices1,), command1.desired_velocity)
+    cmd.desired_velocity = cmd.desired_position.index_put_((indices2,), command2.desired_velocity)
+
+    # Concatenate the desired_extra_torque
+    cmd.desired_extra_torque = cmd.desired_position.index_put_((indices1,), command1.desired_extra_torque)
+    cmd.desired_extra_torque = cmd.desired_position.index_put_((indices2,), command2.desired_extra_torque)
+
+    return cmd
+
+
 class MotorModel:
     """Implements a simple DC motor model for simulation.
       To accurately model the motor behaviors, the `MotorGroup` class converts
@@ -143,8 +185,7 @@ class MotorGroup:
             desired_velocity = command.desired_velocity
             kd = command.kd
             self._torque_history.append(command.desired_extra_torque)
-            self._torque_output = 0 * self._torque_output + 1. * self._torque_history[
-                0]
+            self._torque_output = 0 * self._torque_output + 1. * self._torque_history[0]
 
         total_torque = (kp * (desired_position - current_position) + kd *
                         (desired_velocity - current_velocity) + self._torque_output)
@@ -180,8 +221,7 @@ class MotorGroup:
     @strength_ratios.setter
     def strength_ratios(self, value: _FloatOrArray):
         self._strength_ratios = torch.ones(
-            self._num_motors, device=self._device) * to_torch(value,
-                                                              device=self._device)
+            self._num_motors, device=self._device) * to_torch(value, device=self._device)
 
     @property
     def init_positions(self):

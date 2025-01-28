@@ -1,7 +1,7 @@
 """Evaluate a trained policy."""
 
 """
-python -m src.scripts.ppo.eval --logdir=logs/train/pronk_cajun/2024_10_31_00_04_18 --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False --save_traj=True
+python -m src.scripts.ppo.eval --logdir=logs/train/ddpg_trot/demo --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False --save_traj=True
 """
 
 from absl import app
