@@ -65,7 +65,7 @@ class Robot:
         self._robot_actors_global_indices = []
         self._robot_rigid_body_global_indices = []
 
-        self.record_video = True  # Record a video or not
+        self.record_video = False  # Record a video or not
 
         if "cuda" in self._device:
             torch._C._jit_set_profiling_mode(False)
@@ -91,8 +91,6 @@ class Robot:
         self.subscribe_viewer_keyboard_event()
 
         self._post_physics_step()
-        # self.load_plane_asset()
-        # time.sleep(123)
         # self.reset()
 
     def _compute_base_init_state(self, init_positions: torch.Tensor):
@@ -433,6 +431,12 @@ class Robot:
                     self._foot_positions_prev[i, leg_id] -= base_vel_body_frame[i] * dt[i]
 
         print(f"foot_contact_history: {self._foot_positions_prev}")
+
+    def set_robot_base_color(self, color, env_ids=0):
+        base_rigid_body_idx = 0
+        base_color = gymapi.Vec3(*color)  # 变为红色
+        self._gym.set_rigid_body_color(self._envs[env_ids], self._robot_actors[env_ids], base_rigid_body_idx,
+                                       gymapi.MESH_VISUAL, base_color)
 
     def get_motor_angles_from_foot_positions(self, foot_local_positions):
         raise NotImplementedError()

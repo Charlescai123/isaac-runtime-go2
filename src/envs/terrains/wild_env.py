@@ -53,10 +53,10 @@ class WildTerrainEnv:
         # offset_x = 40
         offset_x = 40
         # Add outdoor scene
-        self.load_outdoor_asset(env=self._env, scene_offset_x=offset_x, reverse=False)
+        # self.load_outdoor_asset(env=self._env, scene_offset_x=offset_x, reverse=False)
         # Add uneven terrains
-        add_uneven_terrains(gym=self._gym, sim=self._sim, scene_offset_x=offset_x + self._transform.x,
-                            scene_offset_y=self._transform.y, reverse=False)
+        # add_uneven_terrains(gym=self._gym, sim=self._sim, scene_offset_x=offset_x + self._transform.x,
+        #                     scene_offset_y=self._transform.y, reverse=False)
 
     def load_outdoor_asset(self, env, scene_offset_x=0, reverse=False):
         if reverse:
@@ -86,11 +86,11 @@ class WildTerrainEnv:
         self.load_mountain_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
 
         # Snow Rocks
-        self.load_snow_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
+        # self.load_snow_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
 
         # Random stones
-        self.load_random_snowstones_in_a_region(env=env, scene_offset_x=offset_x, stone_nums=450, reverse=reverse)
-        self.load_random_cobblestones_in_a_region(env=env, scene_offset_x=offset_x, stone_nums=150, reverse=reverse)
+        # self.load_random_snowstones_in_a_region(env=env, scene_offset_x=offset_x, stone_nums=450, reverse=reverse)
+        # self.load_random_cobblestones_in_a_region(env=env, scene_offset_x=offset_x, stone_nums=150, reverse=reverse)
 
     def load_mountain_rocks(self, env, offset_x, offset_y):
         offset_x -= 7

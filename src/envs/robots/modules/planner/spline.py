@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 
 
 class Spline:
-    def __init__(self, eval_interval=0.05, control_interval=0.05) -> None:
+    """Cubic Hermite Spline: Use Hermite to interpolate the motion trajectories"""
+    def __init__(self, eval_interval=0.02, control_interval=0.02) -> None:
         self.T_func = lambda ts: np.stack([ts ** 3, ts ** 2, ts, np.full(ts.shape, 1)], axis=1)[np.newaxis, :,
                                  np.newaxis, :]
         self.T_dot_func = lambda ts: np.stack([3 * ts ** 2, 2 * ts, np.full(ts.shape, 1), np.full(ts.shape, 0)],
@@ -27,7 +28,10 @@ class Spline:
         self.T_dot_control = self.T_dot_func(self.ts_control)
         self.T_ddot_control = self.T_ddot_func(self.ts_control)
 
-        self.M = np.array([[2, -2, 1, 1], [-3, 3, -2, -1], [0, 0, 1, 0], [1, 0, 0, 0]]) * 10
+        self.M = np.array([[2, -2, 1, 1],
+                           [-3, 3, -2, -1],
+                           [0, 0, 1, 0],
+                           [1, 0, 0, 0]])
 
     def fit_eval(self, start_pts, end_pts, start_grads, end_grads):
         G = np.stack([start_pts, end_pts, start_grads, end_grads], axis=1)  # [N, 4, 2]
@@ -65,5 +69,16 @@ class Spline:
 
         xs = np.stack([pos[:, 1], pos[:, 0], ang], axis=-1)
         us = np.stack([lin_speed, ang_speed], axis=-1)[: -1]
+
+        print(f"pos: {pos}")
+        print(f"xy_dot: {xy_dot}")
+        print(f"xy_ddot: {xy_ddot}")
+        print(f"ang: {ang}")
+        print(f"lin_speed: {lin_speed}")
+        print(f"y_dot: {y_dot}")
+        print(f"x_dot: {x_dot}")
+        print(f"y_ddot: {y_ddot}")
+        print(f"x_ddot: {x_ddot}")
+        print(f"ang_speed: {ang_speed}")
 
         return xs, us

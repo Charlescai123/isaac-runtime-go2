@@ -35,8 +35,8 @@ def get_dist(sx, sy, step_size):
 
 
 class FMMPlanner:
-    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=6, obstacle_dist_ratio=.2,
-                 resolution=0.03):
+    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=350, obstacle_dist_ratio=1,
+                 resolution=0.015):
         self.traversable = traversable
         self.fmm_dist = None
         self.add_obstacle_dist = add_obstacle_dist
@@ -57,7 +57,6 @@ class FMMPlanner:
         # self.vels =X self._sample_velocity()
 
     def preprocess_map(self, map, use_config_space, use_gaussian_filter=False):
-
         map = (map < 50)
         if use_config_space:
             y_size, x_size = map.shape
@@ -68,25 +67,26 @@ class FMMPlanner:
 
         return map
 
-    def set_goal(self, goal, auto_improve=False, dx=0.1):
+    def set_goal(self, goal, auto_improve=False, dx=1):
         """Traversable is a binary map with 0-obstacle and 1-free space"""
         traversable_ma = ma.masked_values(self.traversable, 0)
-        goal_y, goal_x = int(goal[0]), int(goal[1])
+        goal_x, goal_y = int(goal[0]), int(goal[1])
 
-        if self.traversable[goal_y, goal_x] == 0. and auto_improve:
-            goal_y, goal_x = self._find_nearest_goal([goal_y, goal_x])
+        if self.traversable[goal_x, goal_y] == 0. and auto_improve:
+            print(f"Current set goal is obstacle, find another nearest goal...")
+            goal_x, goal_y = self._find_nearest_goal([goal_x, goal_y])
 
-        traversable_ma[goal_y, goal_x] = 0
+        traversable_ma[goal_x, goal_y] = 0
 
         # For skfmm.distance, 0 should be the goal points (zero-contour) and all values greater than zero are
         # free space with given distance > 0, all values less than zero are also free space with given distance < 0
-        masked_distance_map = skfmm.distance(traversable_ma, dx=self.resolution)  # Distance map with the obstacle mask
+        masked_distance_map = skfmm.distance(traversable_ma, dx=dx)  # Distance map with the obstacle mask
 
         dd = ma.filled(masked_distance_map, self.large_value)  # Replace the mask with large value
 
         if self.add_obstacle_dist:
             helper_planner = FMMPlanner(self.traversable, add_obstacle_dist=False)
-            obstacle_dist = helper_planner.set_multi_goal(self.traversable == 0)
+            obstacle_dist = helper_planner.set_multi_goal(self.traversable == 0, dx=dx)
             inverse_obstacle_dist = np.minimum(self.obstacle_dist_cap, np.power(obstacle_dist, 2))
             dd += self.obstacle_dist_ratio * (self.obstacle_dist_cap - inverse_obstacle_dist)
 
@@ -94,27 +94,20 @@ class FMMPlanner:
 
         return dd, masked_distance_map
 
-    def set_multi_goal(self, goal_map):
+    def set_multi_goal(self, goal_map, dx=1):
         traversable_ma = ma.masked_values(self.traversable, 0)
         traversable_ma[goal_map == 1] = 0
         dd = skfmm.distance(traversable_ma,
-                            dx=0.1)  # add_obstacle_dist: outputs a nd array (not masked), with 0 at obstacles
+                            dx=dx)  # add_obstacle_dist: outputs a nd array (not masked), with 0 at obstacles
         dd = ma.filled(dd, self.large_value)  # add_obstacle_dist: no effect
         self.fmm_dist = dd
         return dd
 
-    # def _sample_velocity(self):
-    #     step_size_interval = 6
-    #     # [num_step_sizes, num_speeds_per_step_size, num_directions, 2]
-    #     speeds = np.stack([self.step_sizes - step_size_interval / 3, self.step_sizes, self.step_sizes + step_size_interval / 3], axis=-1)[..., np.newaxis, np.newaxis] # [4, 3, 1, 1]
-    #     angles = np.linspace(np.pi / 36, 2 * np.pi, num=36) - np.pi
-    #     unit_vels = np.stack([np.sin(angles), np.cos(angles)], axis=-1)[np.newaxis, np.newaxis, ...] # [1, 1, 36, 2]
-    #     vels = (speeds * unit_vels).reshape(4, -1, 2) # [4, 36 * 3, 2]
-
-    #     return vels
-
     def get_short_term_goal(self, pos, yaw, lin_speed):
         pos_int = [int(x) for x in pos]
+        print(f"pos_int: {pos_int}")
+        print(f"costs on map: {self.fmm_dist[pos_int[0], pos_int[1]]}")
+        time.sleep(1)
 
         if self.fmm_dist[pos_int[0], pos_int[1]] < 0.25 / self.resolution:  # 0.25 m
             stop = True
@@ -122,27 +115,39 @@ class FMMPlanner:
             stop = False
 
         # step_sizes = (lin_speed + self.speeds) / 2 * self.conservative_step_size_factor
+        wtf = np.linspace(np.maximum(lin_speed - 0.4, 0.05),
+                          np.minimum(lin_speed + 0.4, 0.95),
+                          num=10)
+        print(f"wtf: {wtf}")
+        # step_sizes = (lin_speed + np.linspace(np.maximum(lin_speed - 0.4, 0.05),
+        #                                       np.minimum(lin_speed + 0.4, 0.95),
+        #                                       num=10) / self.resolution) / 2  # [n_step]
         step_sizes = (lin_speed + np.linspace(np.maximum(lin_speed - 0.4, 0.05),
                                               np.minimum(lin_speed + 0.4, 0.95),
-                                              num=10) / self.resolution) / 2  # [n_step]
-        # print('speed: ', lin_speed)
-        # print(step_sizes)
+                                              num=10)) / 2  # [n_step]
+
+        print('speed: ', lin_speed)
+        print(f"step_sizes: {step_sizes}")
         fovs_w = yaw + self.fovs
         fovs_w_1d = fovs_w[np.newaxis, :]
-        next_pos = np.stack([np.sin(fovs_w_1d), np.cos(fovs_w_1d)], axis=-1) * step_sizes[:, np.newaxis,
-                                                                               np.newaxis] + pos  # [n_step, n_fov, 2]
+        next_pos = (np.stack([np.sin(fovs_w_1d), np.cos(fovs_w_1d)], axis=-1) *
+                    step_sizes[:, np.newaxis, np.newaxis] + pos)  # [n_step, n_fov, 2]
 
         local_vel_angle = fovs_w_1d[..., np.newaxis] + self.small_fovs[np.newaxis, np.newaxis,
                                                        :]  # [1, n_fov, n_small_fov]
         next_vel \
-            = np.stack([np.sin(local_vel_angle), np.cos(local_vel_angle)], axis=-1) * step_sizes[:, np.newaxis,
-                                                                                      np.newaxis,
-                                                                                      np.newaxis]  # [n_step, n_fov, n_small_fov, 2]
+            = (np.stack([np.sin(local_vel_angle), np.cos(local_vel_angle)], axis=-1) *
+               step_sizes[:, np.newaxis, np.newaxis, np.newaxis])  # [n_step, n_fov, n_small_fov, 2]
 
         next_pos = np.stack([next_pos] * len(self.small_fovs), axis=2)
 
         next_pos_l = next_pos.reshape(-1, 2)
         next_vel_l = next_vel.reshape(-1, 2)
+
+        print(f"pos: {pos}")
+        print(f"yaw: {yaw}")
+        print(f"lin_speed: {lin_speed}")
+        # time.sleep(123)
 
         return next_pos_l, next_vel_l, stop
 
@@ -164,13 +169,13 @@ class FMMPlanner:
     def find_argmin_traj(self, pos_trajs):
         T = pos_trajs.shape[1]
         flat_pos_trajs = pos_trajs.reshape(-1, 2)
+        print(f"flag_pos_trajs: {flat_pos_trajs}")
         # flat_pos_trajs = flat_pos_trajs[::-1]
         fmm_values = self.get_fmm_value(flat_pos_trajs)
         traj_cost = fmm_values.reshape(-1, T)
         argmin_idx = np.argmin(np.sum(traj_cost, axis=-1))
         print(f"fmm_values: {fmm_values}")
         print(f"argmin_idx: {argmin_idx}")
-        # time.sleep(123)
 
         return argmin_idx
 

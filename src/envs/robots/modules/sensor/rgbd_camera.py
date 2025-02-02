@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 import open3d as o3d
 from typing import List, Any
+
+import pylab as p
 from matplotlib import pyplot as plt
 from isaacgym import gymapi, gymtorch
 from scipy.interpolate import griddata
@@ -21,37 +23,6 @@ class BEVMap:
         self.roi_y_range = roi_y_range  # ROI (y range)
         self.roi_z_range = roi_z_range  # ROI (z range)
         self.resolution = resolution  # Resolution
-
-
-def transform_pcd_world_to_camera(pointcloud_world, camera_transform):
-    """
-    将点云从世界坐标系转换到相机坐标系 (World -> Camera)
-
-    :param pointcloud_world: (N, 3) 世界坐标系下的点云
-    :param camera_transform: Isaac Gym 相机的 Transform 结构体
-    :return: (N, 3) 相机坐标系下的点云
-    """
-    # 获取相机位置（世界坐标）
-    T_cam = np.array([camera_transform.p.x, camera_transform.p.y, camera_transform.p.z])
-
-    # 获取相机旋转矩阵（从四元数转换）
-    quat = np.array([camera_transform.r.x, camera_transform.r.y, camera_transform.r.z, camera_transform.r.w])
-    R_cam = Rotation.from_quat(quat).as_matrix()  # 3×3 旋转矩阵
-
-    # 构造 4×4 变换矩阵 (世界 -> 相机)
-    transformation_matrix = np.eye(4)
-    transformation_matrix[:3, :3] = R_cam.T  # 旋转部分
-    transformation_matrix[:3, 3] = -R_cam.T @ T_cam  # 平移部分
-
-    # 转换点云为齐次坐标 (N, 4)
-    num_points = pointcloud_world.shape[0]
-    pointcloud_homogeneous = np.ones((num_points, 4))
-    pointcloud_homogeneous[:, :3] = pointcloud_world  # (N, 4)
-
-    # 进行 4×4 矩阵变换
-    pointcloud_cam_homogeneous = (transformation_matrix @ pointcloud_homogeneous.T).T  # (N, 4)
-
-    return pointcloud_cam_homogeneous[:, :3]  # 只返回 (x, y, z)
 
 
 class RGBDCamera:
@@ -289,11 +260,8 @@ class RGBDCamera:
         z_min, z_max = roi_z_range  # Optional filtering by height
 
         # Filter points within the ROI
-        # x_min, x_max = (-5, 5)
-        # y_min, y_max = (-5, 5)
-        # z_min, z_max = (-10, 0)
         raw_pcd = raw_pcd_wd
-        # raw_pcd = pcd_cam
+        raw_pcd[:, 1] = - raw_pcd[:, 1]  # The y-axis data of point cloud is in opposite direction!!!
         roi_points = raw_pcd[
             (raw_pcd[:, 0] >= x_min) & (raw_pcd[:, 0] <= x_max) &
             (raw_pcd[:, 1] >= y_min) & (raw_pcd[:, 1] <= y_max) &
@@ -337,7 +305,8 @@ class RGBDCamera:
             occupancy_map = np.ones([x_bins, y_bins], dtype=np.uint8) * z_height_feasible_mask
 
             # occupancy_map[0:125, 200:220] = 1      # Manually fill the free-space for robot (optional)
-            occupancy_map[0:140, 200:465] = 1  # Manually fill the free-space for robot (optional)
+            occupancy_map[0:140, 200:465] = 1  # Manually fill the free-space for robot (optional) resolution = 0.015
+            # occupancy_map[0:70, 100:232] = 1  # Manually fill the free-space for robot (optional) resolution = 0.03
 
             bev_map = occupancy_map
 
@@ -414,7 +383,8 @@ class RGBDCamera:
 
         d = _depth[v, u]
         if d <= min_threshold:
-            raise RuntimeError(f"error with the depth camera for the pixel-level origin")
+            # raise RuntimeError(f"error with the depth camera for the pixel-level origin")
+            return [-np.inf, -np.inf, -np.inf], False
 
         cam_width = self._img_width
         cam_height = self._img_height
@@ -429,7 +399,7 @@ class RGBDCamera:
         # Get the pose of origin in world frame
         origin_in_world_frame = [Pw[0, 0], Pw[0, 1], Pw[0, 2]]
 
-        return origin_in_world_frame
+        return origin_in_world_frame, True
 
     def get_pcd_data(self, in_world_frame=True, visualize=False,
                      write_ply=False, filename="pcd.ply") -> o3d.geometry.PointCloud:
@@ -454,9 +424,7 @@ class RGBDCamera:
 
         # View Matrix
         view_mat = self._gym.get_camera_view_matrix(self._sim, self._env_handle, self._camera_handle)
-        print(f" self._env_handle: {self._env_handle}")
-        print(f" self._camera_handle: {self._camera_handle}")
-        print(f"view_mat: {view_mat}")
+
         # Inverse of View Matrix
         view_mat_inv = np.linalg.inv(np.matrix(view_mat))
 

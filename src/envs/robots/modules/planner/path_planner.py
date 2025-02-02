@@ -17,6 +17,7 @@ class PathPlanner:
         self._resolution = 0.015
         self._planner = None
         self._spine = Spline()
+        self._origin_in_world = np.array([0., 0., 0.])
 
     # def update(self, occupancy_map):
     #     self._planner = FMMPlanner(occupancy_map, self._goal)
@@ -29,12 +30,12 @@ class PathPlanner:
                              roi_y_range=(-5, 5)):
         """Project the pose in world frame to the gridmap
 
-        Below are how the x and y look like in a generated raw BEV image (from human eyes)
-           ------------> (x)
-           |
-           |
-           |
-           ↓  (y)
+        Below are how the x and y look like in a generated raw BEV image
+        ------------> (y)
+        |
+        |
+        |
+        ↓  (x)
         """
         if grid_size is None:
             grid_size = self._resolution
@@ -55,25 +56,25 @@ class PathPlanner:
         map_frame = [x_idx, y_idx]
         map_shape = [x_bins, y_bins]
 
-        # map_frame = [y_idx, x_idx]
-
         return map_frame, map_shape
 
-    def world_to_map_frame(self, pose_in_world, env_idx=0, bev_frame=False):
+    def world_to_map_frame(self, pose_in_world, env_idx=0, bev_frame=True):
         """Project the pose from world frame to BEV map frame
 
         The output is human-readable
         """
-        origin_in_world = self._robot.camera_sensor[env_idx].get_depth_origin_world_frame()
-        origin_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=origin_in_world)
+        origin_in_world, flag = self._robot.camera_sensor[env_idx].get_depth_origin_world_frame()
+        if flag is True:
+            self._origin_in_world = origin_in_world
 
-        origin_xy_in_world = origin_in_world[:2]
-        # print(f"origin_in_world_raw: {origin_in_world}")
+        origin_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=self._origin_in_world)
+        origin_xy_in_world = self._origin_in_world[:2]
 
-        # pose_in_world = [54, 1]
-        # pose_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=pose_in_world)
-        # print(f"pose_in_world: {pose_in_world}")
-        # print(f"map_pos_raw: {pose_in_map}")
+        # pose_in_world = [48, 1]
+        pose_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=pose_in_world)
+        print(f"pose_in_world: {pose_in_world}")
+        print(f"pose_in_map: {pose_in_map}")
+        print(f"origin_in_map: {origin_in_map}")
         # time.sleep(123)
 
         # Flip vertically and horizontally
@@ -86,9 +87,7 @@ class PathPlanner:
 
         # Under BEV Frame
         if bev_frame:
-            rot_mat = np.array([[-1, 0],
-                                [0, 1]])  # World to BEV Frame
-            pose_in_map = origin_in_map + rot_mat @ distance_on_map_world_frame
+            pose_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=pose_in_world)
         # Human Readable Frame
         else:
             rot_mat = np.array([[1, 0],
@@ -98,27 +97,22 @@ class PathPlanner:
         # pose_in_map = [pose_in_map_x, pose_in_map_y]
         # print(f"distance_in_map: {distance_in_map}")
         # print(f"origin_flipped_in_map: {origin_flipped_in_map}")
-        print(f"pose_in_map: {pose_in_map}")
+        # print(f"pose_in_map: {pose_in_map}")
 
         return pose_in_map
 
     def map_to_world_frame(self, pose_in_map, env_idx=0):
-        origin_in_world = self._robot.camera_sensor[env_idx].get_depth_origin_world_frame()
-        origin_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=origin_in_world)
+        origin_in_world, flag = self._robot.camera_sensor[env_idx].get_depth_origin_world_frame()
+        if flag:
+            self._origin_in_world = origin_in_world
+        origin_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=self._origin_in_world)
 
-        origin_xy_in_world = origin_in_world[:2]
+        origin_xy_in_world = self._origin_in_world[:2]
 
-        # Flip vertically
-        origin_flipped_xy_map = [origin_in_map[0], map_shape[0] - origin_in_map[1] - 1]
+        distance_in_map = (np.asarray(pose_in_map) - np.asarray(origin_in_map)) * self._resolution
 
-        distance_in_map = (np.asarray(pose_in_map) - np.asarray(origin_flipped_xy_map)) * self._resolution
-        # distance_in_map[1] *= -1
-
-        # pose_in_world_x = origin_xy_in_world[0] + distance_in_world[1]
-        # pose_in_world_y = origin_xy_in_world[1] - distance_in_world[0]
-        # pose_in_world = [pose_in_world_x, pose_in_world_y]
-
-        pose_in_world = np.array([[1, 0], [0, -1]]) @ distance_in_map + origin_xy_in_world
+        pose_in_world = np.array([[1, 0],
+                                  [0, 1]]) @ distance_in_map + origin_xy_in_world
 
         return pose_in_world
 
@@ -153,15 +147,14 @@ class PathPlanner:
         Parameters
         ----------
         goal_in_map : 2d array/list
-                      target position on the map with goal = (target_x, target_y)
+                      target position (BEV frame) on the map with goal = (target_x, target_y)
 
         env_idx: The envs index for obtaining the robot camera (by default 0)
         show_map: whether to show the costmap
 
         """
         occupancy_map = self._robot.camera_sensor[env_idx].get_bev_map(as_occupancy=True, show_map=False)
-        _planner = FMMPlanner(occupancy_map, resolution=0.015)
-        print(f"goal_in_map: {goal_in_map}")
+        _planner = FMMPlanner(occupancy_map, resolution=self._resolution)
         costmap, costmap_for_plot = _planner.set_goal(goal_in_map)
         np.savetxt(f"costmap.txt", costmap, fmt="%.5f")
 
@@ -175,17 +168,22 @@ class PathPlanner:
         # Figure Plot
         if show_map:
             plt.subplot(1, 2, 1)
-            plt.imshow(occupancy_map, origin='lower')
+            plt.imshow(occupancy_map)
             plt.scatter(*goal_in_map[::-1], c='red', s=20, label='Goal')
+            # plt.gca().invert_yaxis()  # Inverse y-axis
+            # plt.gca().invert_xaxis()  # Inverse x-axis
+            # plt.gca().xaxis.tick_right()  # move y-axis to the right
             plt.colorbar(label="Occupancy")
             plt.title("Occupancy Map")
             plt.legend()
 
             plt.subplot(1, 2, 2)
-            plt.imshow(costmap_for_plot, cmap='viridis', origin='lower')
-            # plt.imshow(costmap, cmap='jet', origin='lower')
-            # plt.scatter(*start[::-1], c='blue', label='Start')
+            plt.imshow(costmap_for_plot, cmap='viridis')
+            # plt.imshow(costmap_for_plot, cmap='viridis')
             plt.scatter(*goal_in_map[::-1], c='red', s=20, label='Goal')
+            plt.gca().invert_yaxis()  # Inverse y-axis
+            plt.gca().invert_xaxis()  # Inverse x-axis
+            plt.gca().yaxis.tick_right()  # move y-axis to the right
             plt.title("Cost Map")
             plt.colorbar(label="Cost", cmap='jet')
             plt.legend()
@@ -212,29 +210,29 @@ class PathPlanner:
         curr_pos_w = self._robot.base_position[env_idx, :2].cpu().numpy()
         yaw = self._robot.base_orientation_rpy[env_idx, 2].cpu().numpy()
         curr_vel_w = self._robot.base_velocity_world_frame[env_idx, :2].cpu().numpy()
-        curr_vel_w = curr_vel_w
 
         # Position and Velocity in Map coordinates
-        # curr_pos_m = self.m2mm(self.w2m(curr_pos_w))
-        # curr_pos_m = map_goal
         curr_pos_m = self.world_to_map_frame(pose_in_world=curr_pos_w, bev_frame=True)
-        # curr_pos_m = [curr_pos_m[0], curr_pos_m[1]]
+        curr_vel_m = curr_vel_w / self._planner.resolution
+        print(f"curr_pos_w: {curr_pos_w}")
         print(f"curr_pos_m: {curr_pos_m}")
+        print(f"curr_vel_w: {curr_vel_w}")
+        print(f"curr_vel_m: {curr_vel_m}")
 
-        # curr_pos_m = curr_pos_m[::-1]
-        # curr_vel_m = curr_vel_w / self._planner.resolution
-        curr_vel_m = curr_vel_w
-
-        next_pos_l, next_vel_l, stop = self._planner.get_short_term_goal(pos=curr_pos_m, yaw=yaw, lin_speed=curr_vel_m)
+        next_pos_l, next_vel_l, stop = self._planner.get_short_term_goal(pos=curr_pos_m, yaw=yaw,
+                                                                         lin_speed=np.linalg.norm(curr_vel_m))
         curr_pos_l = np.stack([curr_pos_m] * next_pos_l.shape[0])
         curr_vel_l = np.stack([curr_vel_m] * next_pos_l.shape[0])
 
-        print(f"curr_pos_l: {curr_pos_l.shape}")
-        print(f"curr_vel_l: {curr_vel_l.shape}")
-        print(f"next_pos_l: {next_pos_l.shape}")
-        print(f"next_vel_l: {next_vel_l.shape}")
+        print(f"next_pos_l: {next_pos_l}")
+        print(f"next_vel_l: {next_vel_l}")
 
         next_pos_trajs = self._spine.fit_eval(curr_pos_l, next_pos_l, curr_vel_l, next_vel_l)
+        self.next_pos_trajs = next_pos_trajs
+        self.next_pos_l = next_pos_l
+
+        print(f"next_pos_trajs: {next_pos_trajs}")
+        print(f"next_pos_trajs.shape: {next_pos_trajs.shape}")
         best_traj_idx = self._planner.find_argmin_traj(next_pos_trajs)
 
         next_pos, next_vel = next_pos_l[best_traj_idx], next_vel_l[best_traj_idx]
@@ -244,9 +242,28 @@ class PathPlanner:
         # next_pos = next_pos[::-1]
         # next_vel = next_vel[::-1]
 
-        xs_raw, us_raw = self._spine.fit_reference(curr_pos_m, next_pos, curr_vel_m, next_vel)
+        # curr_pos_m in world
+        # curr_pos_m = np.array([[-1, 0],
+        #                        [0, 1]]) @ curr_pos_m
 
-        return xs_raw, us_raw
+        # curr_pos_v in world
+        # curr_vel_m = np.array([[-1, 0],
+        #                        [0, 1]]) @ curr_vel_m
+
+        # next_pos in world
+        # next_pos = np.array([[-1, 0],
+        #                      [0, 1]]) @ next_pos
+
+        # next_vel in world
+        # next_vel = np.array([[-1, 0],
+        #                      [0, 1]]) @ next_vel
+
+        xs_raw, us_raw = self._spine.fit_reference(curr_pos_m, next_pos, curr_vel_m, next_vel)
+        print(f"xs_raw: {xs_raw}")
+        print(f"us_raw: {us_raw}")
+        # time.sleep(123)
+
+        return xs_raw, us_raw, stop
 
     def get_shortest_path(self, distance_map, start_pt, goal_pt):
         """Given the start and goal point on a distance map, find the shortest path through back-tracing
@@ -280,12 +297,13 @@ class PathPlanner:
 
         shortest_path = [start_pt]
         current = start_pt
-        max_cnt = 10000
+        max_cnt = 1000
         cnt = 0
         while np.linalg.norm(np.array(current) - np.array(goal_pt)) > 1:
+            # Local minima
             if cnt >= max_cnt:
                 break
-            print(f"current: {current}")
+            # print(f"current: {current}")
             y, x = current
             dy, dx = gy[y, x], gx[y, x]  # map gradient
 
