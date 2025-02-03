@@ -107,9 +107,9 @@ class FMMPlanner:
         pos_int = [int(x) for x in pos]
         print(f"pos_int: {pos_int}")
         print(f"costs on map: {self.fmm_dist[pos_int[0], pos_int[1]]}")
-        time.sleep(1)
+        # time.sleep(1)
 
-        if self.fmm_dist[pos_int[0], pos_int[1]] < 0.25 / self.resolution:  # 0.25 m
+        if self.fmm_dist[pos_int[0], pos_int[1]] < 0.5 / self.resolution:  # 0.25 m
             stop = True
         else:
             stop = False
@@ -130,16 +130,22 @@ class FMMPlanner:
         print(f"step_sizes: {step_sizes}")
         fovs_w = yaw + self.fovs
         fovs_w_1d = fovs_w[np.newaxis, :]
-        next_pos = (np.stack([np.sin(fovs_w_1d), np.cos(fovs_w_1d)], axis=-1) *
+        next_pos = (np.stack([np.cos(fovs_w_1d), np.sin(fovs_w_1d)], axis=-1) *
                     step_sizes[:, np.newaxis, np.newaxis] + pos)  # [n_step, n_fov, 2]
 
         local_vel_angle = fovs_w_1d[..., np.newaxis] + self.small_fovs[np.newaxis, np.newaxis,
                                                        :]  # [1, n_fov, n_small_fov]
         next_vel \
-            = (np.stack([np.sin(local_vel_angle), np.cos(local_vel_angle)], axis=-1) *
+            = (np.stack([np.cos(local_vel_angle), np.sin(local_vel_angle)], axis=-1) *
                step_sizes[:, np.newaxis, np.newaxis, np.newaxis])  # [n_step, n_fov, n_small_fov, 2]
 
         next_pos = np.stack([next_pos] * len(self.small_fovs), axis=2)
+
+        print(f"fovs_w: {fovs_w}")
+        print(f"fovs_w_1d: {fovs_w_1d}")
+        print(f"next_pos: {next_pos}")
+        print(f"next_vel: {next_vel}")
+        print(f"local_vel_angle: {local_vel_angle}")
 
         next_pos_l = next_pos.reshape(-1, 2)
         next_vel_l = next_vel.reshape(-1, 2)
@@ -147,7 +153,7 @@ class FMMPlanner:
         print(f"pos: {pos}")
         print(f"yaw: {yaw}")
         print(f"lin_speed: {lin_speed}")
-        # time.sleep(123)
+        # time.sleep(5)
 
         return next_pos_l, next_vel_l, stop
 
@@ -170,7 +176,7 @@ class FMMPlanner:
         T = pos_trajs.shape[1]
         flat_pos_trajs = pos_trajs.reshape(-1, 2)
         print(f"flag_pos_trajs: {flat_pos_trajs}")
-        # flat_pos_trajs = flat_pos_trajs[::-1]
+        flat_pos_trajs = flat_pos_trajs[::-1]
         fmm_values = self.get_fmm_value(flat_pos_trajs)
         traj_cost = fmm_values.reshape(-1, T)
         argmin_idx = np.argmin(np.sum(traj_cost, axis=-1))

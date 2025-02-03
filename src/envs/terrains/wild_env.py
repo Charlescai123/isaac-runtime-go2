@@ -53,10 +53,10 @@ class WildTerrainEnv:
         # offset_x = 40
         offset_x = 40
         # Add outdoor scene
-        # self.load_outdoor_asset(env=self._env, scene_offset_x=offset_x, reverse=False)
+        self.load_outdoor_asset(env=self._env, scene_offset_x=offset_x, reverse=False)
         # Add uneven terrains
-        # add_uneven_terrains(gym=self._gym, sim=self._sim, scene_offset_x=offset_x + self._transform.x,
-        #                     scene_offset_y=self._transform.y, reverse=False)
+        add_uneven_terrains(gym=self._gym, sim=self._sim, scene_offset_x=offset_x + self._transform.x,
+                            scene_offset_y=self._transform.y, reverse=False)
 
     def load_outdoor_asset(self, env, scene_offset_x=0, reverse=False):
         if reverse:
@@ -95,7 +95,7 @@ class WildTerrainEnv:
     def load_mountain_rocks(self, env, offset_x, offset_y):
         offset_x -= 7
         offset_y = 0
-        # Big Snow Rocks
+        # Big Mountain Rocks
         actor1 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock1",
                                   pos=(12 + offset_x, -1.5 + offset_y, 0.1), rot=(0, 0, 1, 0), scale=1.25)
         # actor2 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock2",
@@ -103,7 +103,7 @@ class WildTerrainEnv:
         actor2 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock2",
                                   pos=(14.5 + offset_x, 1.3 + offset_y, 0.1), rot=(0.3, 0.2, 0.1, 1), scale=1.3)
         actor3 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock3",
-                                  pos=(17 + offset_x, -0.5 + offset_y, 0.1), rot=(0.2, 0.1, 0.8, 0), scale=1.35)
+                                  pos=(18 + offset_x, -0.5 + offset_y, 0.1), rot=(0.2, 0.1, 0.8, 0), scale=1.35)
         actor4 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock4",
                                   pos=(16 + offset_x, 0.5 + offset_y, 0.1), rot=(0., 0., 1., 0.), scale=1.4)
         actor5 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock5",

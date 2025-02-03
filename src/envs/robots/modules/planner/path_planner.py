@@ -218,6 +218,7 @@ class PathPlanner:
         print(f"curr_pos_m: {curr_pos_m}")
         print(f"curr_vel_w: {curr_vel_w}")
         print(f"curr_vel_m: {curr_vel_m}")
+        print(f"yaw: {yaw}")
 
         next_pos_l, next_vel_l, stop = self._planner.get_short_term_goal(pos=curr_pos_m, yaw=yaw,
                                                                          lin_speed=np.linalg.norm(curr_vel_m))
@@ -261,7 +262,7 @@ class PathPlanner:
         xs_raw, us_raw = self._spine.fit_reference(curr_pos_m, next_pos, curr_vel_m, next_vel)
         print(f"xs_raw: {xs_raw}")
         print(f"us_raw: {us_raw}")
-        # time.sleep(123)
+        # time.sleep(5)
 
         return xs_raw, us_raw, stop
 

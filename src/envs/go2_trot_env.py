@@ -86,8 +86,6 @@ class Go2TrotEnv:
                  show_gui: bool = False,
                  use_real_robot: bool = False):
         self._step_cnt = 0
-        self._push_cnt = 0
-        self._push_magnitude = 1
 
         self._num_envs = num_envs
         self._device = device
@@ -164,12 +162,6 @@ class Go2TrotEnv:
         self._robot.set_foot_frictions(self._config.get('foot_friction', 1.))
 
         # Get observation
-        actor_count = self._gym.get_actor_count(self._robot._envs[0])
-        actor_names = [self._gym.get_actor_name(self._robot._envs[0], i) for i in range(actor_count)]
-
-        for name in actor_names:
-            print(name)
-
         root_state_tensor = self._gym.acquire_actor_root_state_tensor(self._sim)
         self._gym.refresh_actor_root_state_tensor(self._sim)
 
@@ -220,7 +212,11 @@ class Go2TrotEnv:
         self._planner = PathPlanner(self._robot, device=self._device)
         self._shortest_path = []
         self._stop_flag = False
+        self._planning_flag = True
+        self._ref_yaw_rate = deque()
+        self._step_cnt_solo = 0
 
+        # Episode statistics
         self._steps_count = torch.zeros(self._num_envs, device=self._device)
         self._init_yaw = torch.zeros(self._num_envs, device=self._device)
         self._episode_length = self._config.episode_length_s / self._config.env_dt
@@ -232,11 +228,6 @@ class Go2TrotEnv:
         self._cycle_count = torch.zeros(self._num_envs, device=self._device)
 
         self._extras = dict()
-
-        # Planning
-        self._planning_flag = True
-        self._ref_yaw_rate = deque()
-        self._step_cnt_solo = 0
 
         # Running a few steps with dummy commands to ensure JIT compilation
         if self._num_envs == 1 and self._use_real_robot:
@@ -314,13 +305,11 @@ class Go2TrotEnv:
 
     def step(self, drl_action: torch.Tensor):
 
-        # time.sleep(1)
         # print(f"action is: {action}")
         self._last_obs_buf = torch.clone(self._obs_buf)
 
         self._last_action = torch.clone(drl_action)
         drl_action = torch.clip(drl_action, self._action_lb, self._action_ub)
-        # time.sleep(1)
         # action = torch.zeros_like(action)
         sum_reward = torch.zeros(self._num_envs, device=self._device)
         dones = torch.zeros(self._num_envs, device=self._device, dtype=torch.bool)
@@ -328,7 +317,6 @@ class Go2TrotEnv:
         logs = []
 
         start = time.time()
-        # self._config.env_dt = 0.002
 
         for step in range(max(int(self._config.env_dt / self._robot.control_timestep), 1)):
             # print(f"config.env_dt: {self._config.env_dt}")
@@ -340,8 +328,8 @@ class Go2TrotEnv:
             # self._robot.state_estimator.update_foot_contact(self._gait_generator.desired_contact_state)
 
             if self._planning_flag:
-                goal = [51, 2]  # In (x, y) from world frame
-                # goal = [51, 0]  # In (x, y) from world frame
+                # goal = [51, 2]  # In (x, y) from world frame
+                goal = [52, 2]  # In (x, y) from world frame
                 # goal = [49, -1]  # In (x, y) from world frame
                 # goal = [52, -3]  # In (x, y) from world frame
 
@@ -430,21 +418,20 @@ class Go2TrotEnv:
                     #     print(f"pts_in_world: {pts_in_world}")
                     # self._draw_path(pts=np.asarray(next_pos_trajs))
 
-                    next_pos_l = []
-                    print(f"self._planner.next_pos_l: {self._planner.next_pos_l}")
-                    print(f"self._planner.next_pos_l: {self._planner.next_pos_l.shape}")
-                    for i in range(self._planner.next_pos_l.shape[0]):
-                        pts = self._planner.next_pos_l[i]
-                        print(f"pts[{i}]: {pts}")
-                        pts_in_world = self._planner.map_to_world_frame(pts)
-                        next_pos_l.append(pts_in_world)
-                        print(f"pts_in_world: {pts_in_world}")
-                    self._draw_path(pts=np.asarray(next_pos_l))
+                    # next_pos_l = []
+                    # print(f"self._planner.next_pos_l: {self._planner.next_pos_l}")
+                    # print(f"self._planner.next_pos_l: {self._planner.next_pos_l.shape}")
+                    # for i in range(self._planner.next_pos_l.shape[0]):
+                    #     pts = self._planner.next_pos_l[i]
+                    #     print(f"pts[{i}]: {pts}")
+                    #     pts_in_world = self._planner.map_to_world_frame(pts)
+                    #     next_pos_l.append(pts_in_world)
+                    #     print(f"pts_in_world: {pts_in_world}")
+                    # self._draw_path(pts=np.asarray(next_pos_l))
 
-                    time.sleep(5)
+                    # time.sleep(5)
                     print(f"ref_pos: {ref_pos}")
                     print(f"ref_vel: {ref_vel}")
-                    # time.sleep(123)
                     self._ref_yaw_rate.extend(ref_vel)
                     self._stop_flag = flag
 
@@ -457,9 +444,9 @@ class Go2TrotEnv:
                     # Set desired command
                     self.desired_vx = 0.6
                     # self.desired_vx = vel_x
-                    # self.desired_wz = ref_wz
-                    clip_wz = 0.4
-                    self.desired_wz = np.clip(ref_wz, -clip_wz, clip_wz)
+                    self.desired_wz = ref_wz
+                    # clip_wz = 0.5
+                    # self.desired_wz = np.clip(ref_wz, -clip_wz, clip_wz)
 
                     # Determine to stop or not
                     if self._stop_flag:
@@ -537,7 +524,7 @@ class Go2TrotEnv:
                     swing_foot_position=desired_foot_positions[hp_indices],
                     generated_acc=terminal_stance_ddq[hp_indices]
                 )
-                self.robot.set_robot_base_color(color=(0, 0, 1), env_ids=hp_indices)    # Display Blue
+                self.robot.set_robot_base_color(color=(0, 0, 1), env_ids=hp_indices)  # Display Blue
 
             # HA-Teacher in Control
             if len(ha_indices) > 0:
@@ -547,7 +534,7 @@ class Go2TrotEnv:
                     swing_foot_position=desired_foot_positions[ha_indices],
                     safe_acc=terminal_stance_ddq[ha_indices]
                 )
-                self.robot.set_robot_base_color(color=(1, 0, 0), env_ids=ha_indices)    # Display Red
+                self.robot.set_robot_base_color(color=(1, 0, 0), env_ids=ha_indices)  # Display Red
 
             # Unknown Action Mode
             if len(hp_indices) == 0 and len(ha_indices) == 0:
@@ -777,7 +764,6 @@ class Go2TrotEnv:
             limb_contact = torch.sum(limb_contact, dim=1)
             is_unsafe = torch.logical_or(is_unsafe, limb_contact > 0)
 
-        # print(self._robot.base_position[:, 2])
         # input("Any Key...")
         # if is_unsafe.any():
         #   import pdb
@@ -840,32 +826,15 @@ class Go2TrotEnv:
         self._cycle_count = (self._gait_generator.true_phase /
                              (2 * torch.pi)).long()
 
-    def _draw_goals(self, goal, env_ids=0):
-        # Red
-        sphere_geom = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(1, 0, 0))
-
-        # Blue
-        sphere_geom_cur = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(0, 0, 1))
-
-        # Green
-        sphere_geom_reached = gymutil.WireframeSphereGeometry(0.2, 32, 32, None, color=(0, 1, 0))
-        sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(1, 0.35, 0.25))
-        sphere_geom_arrow2 = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(0, 1, 0.5))
-
+    def _draw_goals(self, goal, color=(1, 0, 0), env_ids=0):
+        # Red by default
+        sphere_geom = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=color)
         pose = gymapi.Transform(gymapi.Vec3(goal[0], goal[1], 0), r=None)
         gymutil.draw_lines(sphere_geom, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
-        # pose = gymapi.Transform(gymapi.Vec3(goal[0] + 1, goal[1] + 1, 0), r=None)
-        # gymutil.draw_lines(sphere_geom_cur, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
-        # pose = gymapi.Transform(gymapi.Vec3(goal[0] + 2, goal[1] + 2, 0), r=None)
-        # gymutil.draw_lines(sphere_geom_reached, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
-        # pose = gymapi.Transform(gymapi.Vec3(goal[0] + 3, goal[1] + 3, 0), r=None)
-        # gymutil.draw_lines(sphere_geom_arrow, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
-        # pose = gymapi.Transform(gymapi.Vec3(goal[0] + 4, goal[1] + 4, 0), r=None)
-        # gymutil.draw_lines(sphere_geom_arrow2, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
 
-    def _draw_path(self, pts, env_ids=0):
-        # Red
-        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 32, 32, None, color=(0, 0, 0))
+    def _draw_path(self, pts, color=(0, 0, 0), env_ids=0):
+        # Black by default
+        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 32, 32, None, color=color)
         for i in range(pts.shape[0]):
             pose = gymapi.Transform(gymapi.Vec3(pts[i, 0], pts[i, 1], 0), r=None)
             gymutil.draw_lines(sphere_geom, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
