@@ -17,6 +17,7 @@ from src.envs.robots.modules.controller import raibert_swing_leg_controller, qp_
 from src.envs.robots.modules.gait_generator import phase_gait_generator
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.modules.planner.path_planner import PathPlanner
+from src.envs.robots.modules.planner.utils import get_shortest_path, path_plot
 from src.envs.robots.motors import MotorControlMode, concatenate_motor_actions
 from src.envs.terrains.wild_env import WildTerrainEnv
 from src.ha_teacher.ha_teacher import HATeacher
@@ -211,6 +212,7 @@ class Go2TrotEnv:
         # Path Planner
         self._planner = PathPlanner(self._robot, device=self._device)
         self._shortest_path = []
+        self._goal = None
         self._stop_flag = False
         self._planning_flag = True
         self._ref_yaw_rate = deque()
@@ -311,6 +313,7 @@ class Go2TrotEnv:
         self._last_action = torch.clone(drl_action)
         drl_action = torch.clip(drl_action, self._action_lb, self._action_ub)
         # action = torch.zeros_like(action)
+        nominal_actions = torch.zeros(self._num_envs, 6, device=self._device)
         sum_reward = torch.zeros(self._num_envs, device=self._device)
         dones = torch.zeros(self._num_envs, device=self._device, dtype=torch.bool)
         self._steps_count += 1
@@ -319,8 +322,8 @@ class Go2TrotEnv:
         start = time.time()
 
         for step in range(max(int(self._config.env_dt / self._robot.control_timestep), 1)):
-            # print(f"config.env_dt: {self._config.env_dt}")
-            # print(f"self._robot.control_timestep: {self._robot.control_timestep}")
+            print(f"config.env_dt: {self._config.env_dt}")
+            print(f"self._robot.control_timestep: {self._robot.control_timestep}")
             self._gait_generator.update()
             self._swing_leg_controller.update()
 
@@ -329,86 +332,58 @@ class Go2TrotEnv:
 
             if self._planning_flag:
                 # goal = [51, 2]  # In (x, y) from world frame
-                goal = [52, 2]  # In (x, y) from world frame
-                # goal = [49, -1]  # In (x, y) from world frame
-                # goal = [52, -3]  # In (x, y) from world frame
-
-                # Plot the depth camera origin in world frame
-                # map_origin_in_world = self._robot.camera_sensor[0].get_depth_origin_world_frame()
-                # self._draw_goals(goal=map_origin_in_world)
-
-                map_goal = self._planner.world_to_map_frame(pose_in_world=goal)
-
-                # Human readable map goal
-                # x
-                # ^
-                # |
-                # | ----> y
-                print(f"map_goal: {map_goal}")
 
                 if self._step_cnt_solo == 0:
+                    for goal in self._planner.navigation_goal_in_world:
+                        self._draw_goals(goal=goal, color=(1, 0, 0), size=0.1)
+
+                    if self._goal is None:
+                        self._goal = self._planner.navigation_goal_in_world.popleft()
+
+                    map_goal = self._planner.world_to_map_frame(pose_in_world=self._goal)
+
+                    # Human readable map goal
+                    # x
+                    # ^
+                    # |
+                    # | ----> y
+                    print(f"map_goal: {map_goal}")
+
                     self._occupancy_map = self._robot.camera_sensor[0].get_bev_map(as_occupancy=True,
                                                                                    show_map=False,
                                                                                    save_map=True)
                     self._costmap, self._costmap_for_plot = self._planner.get_costmap(goal_in_map=map_goal,
                                                                                       show_map=True)
-                    self._draw_goals(goal=goal)
+
                     from scipy.ndimage import gaussian_filter
 
                     # sigma = 5
                     # self._costmap = gaussian_filter(self._costmap, sigma=sigma)
                     # self._costmap_for_plot = gaussian_filter(self._costmap_for_plot, sigma=sigma)
 
-                    # start_pt = (200, 350)
-                if self._step_cnt_solo == 0:
                     curr_pos_w = self._robot.base_position[0, :2]
                     start_pt = self._planner.world_to_map_frame(pose_in_world=curr_pos_w.cpu())
                     start_pt = (int(start_pt[0]), int(start_pt[1]))
                     print(f"start_pt: {start_pt}")
 
-                    def path_plot(start, goal):
-                        path = self._planner.get_shortest_path(distance_map=self._costmap, start_pt=start,
-                                                               goal_pt=goal)
-                        # path = path[:1]
+                    path = get_shortest_path(distance_map=self._costmap, start_pt=start_pt,
+                                             goal_pt=self._goal)
+                    path_in_world = []
+                    for i in range(len(path)):
+                        path_pts_in_world = self._planner.map_to_world_frame(path[i])
+                        path_in_world.append(path_pts_in_world)
 
-                        for i in range(len(path)):
-                            path_in_world = self._planner.map_to_world_frame(path[i])
-                            self._shortest_path.append(path_in_world)
+                    path_plot(distance_map=self._costmap_for_plot, path=path, start=start_pt,
+                              goal=map_goal)  # Plot the shortest path
 
-                        # Visualize the costmap
-                        plt.figure(figsize=(8, 8))
-                        # plt.imshow(self._costmap_for_plot, cmap="coolwarm", origin="lower")
-                        plt.imshow(self._costmap_for_plot, cmap='viridis')
-                        plt.gca().invert_yaxis()  # Inverse y-axis
-                        plt.gca().invert_xaxis()  # Inverse x-axis
-                        plt.gca().yaxis.tick_right()  # move y-axis to the right
-                        plt.colorbar(label="Distance from Goal (m)")
-                        plt.scatter(*goal[::-1], color="green", label="Goal", marker="x", s=100)
-                        plt.scatter(*start[::-1], color="blue", label="Start", marker="o", s=100)
-
-                        # Visualize the shortest path
-                        plt.plot(np.asarray(path)[:, 1], np.asarray(path)[:, 0], color="black", linewidth=2,
-                                 label="Shortest Path")
-                        plt.legend()
-                        plt.title("Shortest Path on Distance Map")
-                        plt.show()
-
-                    path_plot(start=start_pt, goal=map_goal)  # Plot the shortest path
-
-                    # Plot the shortest path
-                    # self._draw_path(pts=np.asarray(self._shortest_path))
+                    # Plot the shortest path in the world frame
+                    # self._draw_path(pts=np.asarray(path_in_world))
 
                 if len(self._ref_yaw_rate) == 0:
                     # Generate trajectory (yaw_rate)
 
-                    # Position and Velocity in Map coordinates
-                    # self._costmap, self._costmap_for_plot = self._planner.get_costmap(goal_in_map=map_goal,
-                    #                                                                   show_map=True)
-
-                    ref_pos, ref_vel, flag = self._planner.generate_ref_trajectory(map_goal=map_goal,
-                                                                                   occupancy_map=self._occupancy_map)
-                    print(f"self._planner.next_pos_trajs: {self._planner.next_pos_trajs.reshape(-1, 2)}")
-                    print(f"self._planner.next_pos_trajs: {self._planner.next_pos_trajs.shape}")
+                    ref_pos, ref_vel, flag = self._planner.navigate_to_goal(goal=self._goal,
+                                                                            occupancy_map=self._occupancy_map)
                     # next_pos_trajs = []
                     # for i in range(self._planner.next_pos_trajs.shape[0]):
                     #     pts = self._planner.next_pos_trajs.reshape(-1, 2)[i]
@@ -429,7 +404,6 @@ class Go2TrotEnv:
                     #     print(f"pts_in_world: {pts_in_world}")
                     # self._draw_path(pts=np.asarray(next_pos_l))
 
-                    # time.sleep(5)
                     print(f"ref_pos: {ref_pos}")
                     print(f"ref_vel: {ref_vel}")
                     self._ref_yaw_rate.extend(ref_vel)
@@ -438,30 +412,35 @@ class Go2TrotEnv:
                 if len(self._ref_yaw_rate) > 0:
                     # Reference speed
                     ut = self._ref_yaw_rate.popleft()
-                    vel_x = ut[0] * 0.2
+                    vel_x = ut[0] * 1
                     ref_wz = ut[1] * 1
 
                     # Set desired command
                     self.desired_vx = 0.6
                     # self.desired_vx = vel_x
                     self.desired_wz = ref_wz
-                    # clip_wz = 0.5
-                    # self.desired_wz = np.clip(ref_wz, -clip_wz, clip_wz)
+                    clip_wz = 1
+                    self.desired_wz = np.clip(ref_wz, -clip_wz, clip_wz)
 
-                    # Determine to stop or not
-                    if self._stop_flag:
-                        self.desired_vx = 0
-                        self.desired_wz = 0
-                        print(f"The robot is near the goal, stop!!!")
-                        time.sleep(1)
+                # Determine to stop or not
+                if self._stop_flag:
+                    current_goal = self._goal
+                    if len(self._planner.navigation_goal_in_world) > 0:
+                        self._goal = self._planner.navigation_goal_in_world.popleft()
+                    self._ref_yaw_rate.clear()
+                    self.desired_vx = 0
+                    self.desired_wz = 0
+                    print(f"The robot is near the goal, stop!!!")
+                    self._draw_goals(goal=current_goal, color=(0, 1, 0), size=0.1)
+                    self._stop_flag = False
 
-                    # Setup controller reference
-                    self._torque_optimizer.set_controller_reference(
-                        desired_height=self.desired_com_height,
-                        desired_lin_vel=[self.desired_vx, 0, 0],
-                        desired_rpy=[0, 0, 0],
-                        desired_ang_vel=[0, 0, self.desired_wz]
-                    )
+                # Setup controller reference
+                self._torque_optimizer.set_controller_reference(
+                    desired_height=self.desired_com_height,
+                    desired_lin_vel=[self.desired_vx, 0, 0],
+                    desired_rpy=[0, 0, 0],
+                    desired_ang_vel=[0, 0, self.desired_wz]
+                )
 
             # self._planner.get_costmap(goal_in_map=map_goal, show_map=True)
             # self._planner.set_goal(map_goal)
@@ -525,6 +504,7 @@ class Go2TrotEnv:
                     generated_acc=terminal_stance_ddq[hp_indices]
                 )
                 self.robot.set_robot_base_color(color=(0, 0, 1), env_ids=hp_indices)  # Display Blue
+                nominal_actions[hp_indices] = drl_action  # Nominal actions for HP-student
 
             # HA-Teacher in Control
             if len(ha_indices) > 0:
@@ -535,6 +515,8 @@ class Go2TrotEnv:
                     safe_acc=terminal_stance_ddq[ha_indices]
                 )
                 self.robot.set_robot_base_color(color=(1, 0, 0), env_ids=ha_indices)  # Display Red
+                # Nominal actions for HP-student
+                nominal_actions[ha_indices] = ha_action[ha_indices] - self._desired_acc[ha_indices]
 
             # Unknown Action Mode
             if len(hp_indices) == 0 and len(ha_indices) == 0:
@@ -603,7 +585,7 @@ class Go2TrotEnv:
             rewards = self.get_lyapunov_reward(err=err_prev, err_next=err_next)
 
             # Dones or not
-            # dones = torch.logical_or(dones, self._is_done())
+            dones = torch.logical_or(dones, self._is_done())
 
             # Sum reward
             sum_reward += rewards * torch.logical_not(dones)
@@ -673,7 +655,7 @@ class Go2TrotEnv:
 
         end = time.time()
         print(f"***************** step duration: {end - start} *****************")
-        return self._obs_buf, self._privileged_obs_buf, sum_reward, dones, self._extras
+        return self._obs_buf, self._privileged_obs_buf, nominal_actions, sum_reward, dones, self._extras
 
     def _get_observations(self):
 
@@ -751,7 +733,7 @@ class Go2TrotEnv:
         is_unsafe = torch.logical_or(
             # self._robot.projected_gravity[:, 2] < gravity_threshold,
             to_torch(False, dtype=torch.bool, device=self._device),
-            self._robot.base_position[:, 2] < self._config.get('terminate_on_height', 0.1))
+            self._robot.base_position[:, 2] < self._config.get('terminate_on_height', 0.15))
         if torch.any(is_unsafe):
             print(f"self._robot.projected_gravity[:, 2]: {self._robot.projected_gravity[:, 2]}")
             print(f" self._robot.base_position[:, 2]: {self._robot.base_position[:, 2]}")
@@ -826,9 +808,9 @@ class Go2TrotEnv:
         self._cycle_count = (self._gait_generator.true_phase /
                              (2 * torch.pi)).long()
 
-    def _draw_goals(self, goal, color=(1, 0, 0), env_ids=0):
+    def _draw_goals(self, goal, color=(1, 0, 0), size=0.1, env_ids=0):
         # Red by default
-        sphere_geom = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=color)
+        sphere_geom = gymutil.WireframeSphereGeometry(size, 32, 32, None, color=color)
         pose = gymapi.Transform(gymapi.Vec3(goal[0], goal[1], 0), r=None)
         gymutil.draw_lines(sphere_geom, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
 

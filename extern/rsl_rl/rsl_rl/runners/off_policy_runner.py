@@ -82,15 +82,16 @@ class OffPolicyRunner:
             # with torch.inference_mode():
 
             for i in range(self.num_steps_per_env):
-                actions = self.alg.act(obs, critic_obs)
+                drl_actions = self.alg.act(obs, critic_obs)
                 prev_obs = self.env.get_observations()
-                obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
+                obs, privileged_obs, actions, rewards, dones, infos = self.env.step(drl_actions)
                 # print(f"prev_obs: {prev_obs}")
                 # print(f"next_obs: {obs}")
                 # print(f"infos: {infos}")
                 critic_obs = privileged_obs if privileged_obs is not None else obs
-                prev_obs, obs, critic_obs, rewards, dones = prev_obs.to(self.device), obs.to(
-                    self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                prev_obs, obs, critic_obs, actions, rewards, dones = prev_obs.to(self.device), obs.to(
+                    self.device), critic_obs.to(self.device), actions.to(self.device), rewards.to(
+                    self.device), dones.to(self.device)
                 # self.alg.process_env_step(rewards, dones, infos)
                 print(f"rewards: {rewards}")
                 print(f"rewards: {rewards.shape}")

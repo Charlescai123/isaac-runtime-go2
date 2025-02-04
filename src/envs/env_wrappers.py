@@ -40,19 +40,19 @@ class RangeNormalize(AttributeModifier):
         low, high = self._env.action_space
         return -torch.ones_like(low), torch.ones_like(low)
 
-    def step(self, action):
+    def step(self, drl_action):
         # action = self._denormalize_action(action)
         import numpy as np
 
         magnitude = to_torch([4, 4, 2, 8, 8, 4], device=self._device) * 0.5  # 6 dims
         # magnitude = to_torch([4, 4, 2, 8, 2, 0.], device=self._device) * 2 # 6 dims
         # magnitude = np.array([2, 1, 2, 2, 1, 0.5]) * 2  # 6 dims
-        action *= magnitude
+        drl_action *= magnitude
         # action_zeros = torch.zeros_like(action)
         # print(f"action_zero is: {action_zeros}")
-        observ, privileged_obs, reward, done, info = self._env.step(action)
+        observ, privileged_obs, action, reward, done, info = self._env.step(drl_action)
         observ = self._normalize_observ(observ)
-        return observ, privileged_obs, reward, done, info
+        return observ, privileged_obs, action, reward, done, info
 
     def reset(self):
         observ, privileged_obs = self._env.reset()

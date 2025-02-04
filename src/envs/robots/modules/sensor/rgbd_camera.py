@@ -13,16 +13,16 @@ from scipy.interpolate import griddata
 from scipy.spatial.transform import Rotation
 
 
-class BEVMap:
-    def __init__(self,
-                 roi_x_range=(45, 55),
-                 roi_y_range=(-5, 5),
-                 roi_z_range=(-20, 20),
-                 resolution=0.015):
-        self.roi_x_range = roi_x_range  # ROI (x range)
-        self.roi_y_range = roi_y_range  # ROI (y range)
-        self.roi_z_range = roi_z_range  # ROI (z range)
-        self.resolution = resolution  # Resolution
+# class BEVMap:
+#     def __init__(self,
+#                  roi_x_range=(45, 55),
+#                  roi_y_range=(-5, 5),
+#                  roi_z_range=(-20, 20),
+#                  resolution=0.015):
+#         self.roi_x_range = roi_x_range  # ROI (x range)
+#         self.roi_y_range = roi_y_range  # ROI (y range)
+#         self.roi_z_range = roi_z_range  # ROI (z range)
+#         self.resolution = resolution  # Resolution
 
 
 class RGBDCamera:
@@ -55,14 +55,6 @@ class RGBDCamera:
 
         color_image = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_COLOR)
         _depth_img = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_DEPTH)
-        #
-        # rgba_image = np.frombuffer(color_image, dtype=np.uint8).reshape(self._img_height, self._img_width, 4)
-        # rgb_image = rgba_image[:, :, :3]
-
-        # depth_image_ = self._gym.get_camera_image_gpu_tensor(self._sim, self._env_handle, self._camera_handle,
-        #                                                      gymapi.IMAGE_DEPTH)
-        # torch_camera_depth_tensor = gymtorch.wrap_tensor(depth_image_)
-        # _depth_img = torch_camera_depth_tensor.clone().cpu().numpy()
 
         self._gym.end_access_image_tensors(self._sim)
 
@@ -87,16 +79,6 @@ class RGBDCamera:
         return camera_handle
 
     def get_current_frame(self, img_save=True, img_show=True):
-
-        # if self._frame_cnt == 0:
-        #     bev_img = self.get_bev_map(
-        #         as_occupancy=True,
-        #         show_map=False,
-        #         reverse_xy=True,
-        #         # save_map=True,
-        #     )
-        #     occupancy_map = bev_img
-        #     np.savetxt(f"occ.txt", occupancy_map, fmt="%d")
 
         self._gym.render_all_camera_sensors(self._sim)
         self._gym.start_access_image_tensors(self._sim)
@@ -313,8 +295,7 @@ class RGBDCamera:
         # Flip the BEV Map
         # bev_map = bev_map[::-1]
         # bev_map = np.fliplr(bev_map)
-        print(f"bevmap.shape: {bev_map.shape}")
-        np.savetxt(f"bevmap.txt", bev_map, fmt="%.1f")
+        # np.savetxt(f"bevmap.txt", bev_map, fmt="%.1f")
 
         # Store BEV Map
         if save_map:

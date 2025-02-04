@@ -75,8 +75,8 @@ def main(argv):
     # HA-Teacher module
     if FLAGS.enable_ha_teacher:
         config.environment.ha_teacher.enable = True
-        config.environment.ha_teacher.chi = 0.2
-        config.environment.ha_teacher.tau = 150
+        config.environment.ha_teacher.chi = 0.15
+        config.environment.ha_teacher.tau = 100
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -152,13 +152,13 @@ def main(argv):
             # print(f"action is: {to_torch(action.numpy())}")
             # print(f"action is: {type(to_torch(action))}")
             # action = torch.zeros(6).unsqueeze(dim=0)
-            state, _, reward, done, info = env.step(action)
+            state, _, nominal_action, reward, done, info = env.step(action)
             print(f"Time: {env.robot.time_since_reset}, Reward: {reward}")
 
             total_reward += reward
             logs.extend(info["logs"])
 
-            if steps_count == 1000 or done.any():
+            if steps_count == 20000 or done.any():
                 print(info["episode"])
                 break
 

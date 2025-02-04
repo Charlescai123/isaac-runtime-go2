@@ -41,7 +41,7 @@ class HATeacher:
         self._patch_center = torch.zeros((self._num_envs, 12), dtype=torch.float32, device=device)
         self._center_update = torch.full((self._num_envs,), True, dtype=torch.bool, device=device)
         self._dwell_step = torch.zeros(self._num_envs, dtype=torch.float32, device=device)
-        _patch_interval = 10
+        _patch_interval = 2
         self.patch_interval = torch.full((self._num_envs,), _patch_interval, dtype=torch.int64, device=device)
         _apply_rt_patch = True  #
         self.apply_realtime_patch = torch.full((self._num_envs,), _apply_rt_patch, dtype=torch.bool, device=device)

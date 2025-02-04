@@ -71,6 +71,7 @@ def top_down_view_map(points,
     x_max = int((side_range[1] - side_range[0]) / resolution)
     y_max = int((fwd_range[1] - fwd_range[0]) / resolution)
 
+
 def birds_eye_point_cloud(points: np.ndarray,
                           side_range=(-2, 2),
                           fwd_range=(0, 4),
@@ -176,3 +177,92 @@ def birds_eye_point_cloud(points: np.ndarray,
     print(f"im: {im.shape}")
 
     return im
+
+
+def path_plot(distance_map, path, start, goal):
+    """Plot the path from start point to goal point on a distance map"""
+    # Visualize the distance map
+    plt.figure(figsize=(8, 8))
+    # plt.imshow(self._costmap_for_plot, cmap="coolwarm", origin="lower")
+    plt.imshow(distance_map, cmap='viridis')
+    plt.gca().invert_yaxis()  # Inverse y-axis
+    plt.gca().invert_xaxis()  # Inverse x-axis
+    plt.gca().yaxis.tick_right()  # move y-axis to the right
+    plt.colorbar(label="Distance from Goal (m)")
+    plt.scatter(*goal[::-1], color="green", label="Goal", marker="x", s=100)
+    plt.scatter(*start[::-1], color="blue", label="Start", marker="o", s=100)
+
+    # Visualize the shortest path
+    plt.plot(np.asarray(path)[:, 1], np.asarray(path)[:, 0], color="black", linewidth=2,
+             label="Shortest Path")
+    plt.legend()
+    plt.title("Shortest Path on Distance Map")
+    plt.show()
+
+
+def get_shortest_path(distance_map, start_pt, goal_pt, precise=0.01, max_cnt=1000):
+    """Given the start and goal point on a distance map, find the shortest path through back-tracing
+
+    Parameters
+    ----------
+    distance_map : 2d array/list
+                   a gridmap with corresponding distances at each grid to the goal point. The obstacles
+                   on the map should be assigned a large distance value
+
+    start_pt: The coordinate of a start point on the map, must be integer with order in (y, x)
+    goal_pt: The coordinate of a goal point on the map, must be integer with order in (y, x)
+    precise: The precise for the searching algorithm (gradient)
+    max_cnt: A number used to search for the largest times to prevent local minima on map
+
+    Returns
+    ----------
+    shortest_path: a list of all the points from start to the goal, with each point order in (y, x)
+    """
+    print(f"Searching for the shortest path...")
+
+    # Assure the point of Int type
+    start_pt = (int(start_pt[0]), int(start_pt[1]))
+    goal_pt = (int(goal_pt[0]), int(goal_pt[1]))
+
+    # Gradient of the map (∇distance_map)
+    gy, gx = np.gradient(distance_map)
+    gy += np.random.uniform(-precise, precise, size=gy.shape)
+    gx += np.random.uniform(-precise, precise, size=gx.shape)
+    # np.savetxt("gx.txt", gx)
+    # np.savetxt("gy.txt", gy)
+
+    shortest_path = [start_pt]
+    current = start_pt
+    cnt = 0
+    while np.linalg.norm(np.array(current) - np.array(goal_pt)) > 1:
+        # Local minima
+        if cnt >= max_cnt:
+            break
+        # print(f"current: {current}")
+        y, x = current
+        dy, dx = gy[y, x], gx[y, x]  # map gradient
+
+        # Avoid local-minima
+        if dy == 0 and dx == 0:
+            break
+
+        # Normalized direction
+        step = np.array([-dy, -dx]) / np.linalg.norm([dy, dx]) + 1e-6
+        step = [step[0].item(), step[1].item()]
+
+        # Move to the next point and continue tracing
+        next_point = [int(round(y + step[0])), int(round(x + step[1]))]
+
+        # Exit when tracing to the start point
+        if next_point == current:
+            break
+
+        # Otherwise continue tracing
+        current = next_point
+
+        # Append next point to the result
+        shortest_path.append(next_point)
+
+        cnt += 1
+
+    return shortest_path

@@ -5,7 +5,7 @@ import time
 from absl import app
 from absl import flags
 # from absl import logging
-
+from isaacgym import gymapi, gymutil
 from datetime import datetime
 import os
 
@@ -15,10 +15,11 @@ from rsl_rl.runners import OffPolicyRunner
 from src.envs import env_wrappers
 
 config_flags.DEFINE_config_file("config", "src/configs/trot.py", "experiment configuration.")
-flags.DEFINE_integer("num_envs", 4, "number of parallel environments.")
+flags.DEFINE_integer("num_envs", 1, "number of parallel environments.")
 flags.DEFINE_bool("use_gpu", True, "whether to use GPU.")
-flags.DEFINE_bool("enable_ha_teacher", False, "whether to enable the HA-Teacher.")
+flags.DEFINE_bool("enable_ha_teacher", True, "whether to enable the HA-Teacher.")
 flags.DEFINE_bool("enable_pusher", False, "whether to enable the robot pusher.")
+flags.DEFINE_bool("use_real_robot", False, "whether to use real robot.")
 flags.DEFINE_bool("show_gui", True, "whether to show GUI.")
 flags.DEFINE_string("logdir", "logs", "logdir.")
 flags.DEFINE_string("load_checkpoint", None, "checkpoint to load.")
@@ -41,7 +42,7 @@ def main(argv):
     if FLAGS.enable_ha_teacher:
         config.environment.ha_teacher.enable = True
         config.environment.ha_teacher.chi = 0.15
-        config.environment.ha_teacher.tau = 150
+        config.environment.ha_teacher.tau = 50
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,

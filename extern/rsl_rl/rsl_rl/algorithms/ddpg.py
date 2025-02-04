@@ -256,7 +256,6 @@ class DDPG(AbstractDPG):
 
     def update_distribution(self, observations):
         mean = self.actor(observations)
-        # print(f"self.std: {self.std}")
         self.distribution = Normal(mean, mean * 0. + self.std)
 
     def nn_act(self, observations, **kwargs):
