@@ -3,23 +3,87 @@ import time
 from collections import deque
 
 import numpy as np
+from isaacgym import gymapi, gymutil
 from numpy.core.fromnumeric import mean
 from numpy.lib import utils
 from matplotlib import pyplot as plt
 from src.envs.robots.modules.planner.FMM import FMMPlanner
 from src.envs.robots.modules.planner.spline import Spline
+from src.envs.robots.modules.planner.utils import get_shortest_path, path_plot
 
 
 class PathPlanner:
-    def __init__(self, robot, device="cuda"):
-        self._device = device
+    def __init__(self,
+                 robot,
+                 sim,
+                 viewer,
+                 num_envs,
+                 planning_flag=True,
+                 device="cuda"):
         self._robot = robot
-        self._goal = [500, 300]
+        self._sim = sim
+        self._gym = gymapi.acquire_gym()
+        self._viewer = viewer
+        self._num_envs = num_envs
+        self._device = device
+
+        self._goal = None
         self._resolution = 0.015
         self._planner = None
         self._spine = Spline()
         self._origin_in_world = np.array([0., 0., 0.])
-        self.navigation_goal_in_world = deque([(49, 2), (51.5, 2), (53, -1), (51.5, -3)])
+
+        # Stored map for navigation
+        self._occupancy_map = None
+        self._costmap = None
+        self._costmap_for_plot = None
+
+        # Planning stuff
+        self.planning_flag = planning_flag
+        self.nav_goal_in_world = deque([(49, 2), (51.5, 2), (53, -.5), (51, -2.5)])
+        self._ref_trajectory = deque()
+        self._stop_flag = False
+
+    def init_map(self):
+
+        # Draw all the goals in the world frame
+        for goal in self.nav_goal_in_world:
+            self._draw_goals(goal=goal, color=(1, 0, 0), size=0.17)  # Use Red to draw all goals
+
+        if self._goal is None and len(self.nav_goal_in_world) > 0:
+            self._goal = self.nav_goal_in_world[0]
+            self._draw_goals(goal=self._goal, color=(0, 0, 1), size=0.17)  # Blue represents the current goal
+
+        map_goal = self.world_to_map_frame(pose_in_world=self._goal)
+        self._occupancy_map = self._robot.camera_sensor[0].get_bev_map(as_occupancy=True,
+                                                                       show_map=False,
+                                                                       save_map=False)
+        self._costmap, self._costmap_for_plot = self.get_costmap(goal_in_map=map_goal,
+                                                                 show_map=True)
+
+        from scipy.ndimage import gaussian_filter
+
+        # sigma = 5
+        # self._costmap = gaussian_filter(self._costmap, sigma=sigma)
+        # self._costmap_for_plot = gaussian_filter(self._costmap_for_plot, sigma=sigma)
+
+        curr_pos_w = self._robot.base_position[0, :2]
+        start_pt = self.world_to_map_frame(pose_in_world=curr_pos_w.cpu())
+        start_pt = (int(start_pt[0]), int(start_pt[1]))
+        print(f"start_pt: {start_pt}")
+
+        path = get_shortest_path(distance_map=self._costmap, start_pt=start_pt,
+                                 goal_pt=self._goal)
+        path_in_world = []
+        for i in range(len(path)):
+            path_pts_in_world = self.map_to_world_frame(path[i])
+            path_in_world.append(path_pts_in_world)
+
+        path_plot(distance_map=self._costmap_for_plot, path=path, start=start_pt,
+                  goal=map_goal)  # Plot the shortest path
+
+        # Plot the shortest path in the world frame
+        # self._draw_path(pts=np.asarray(path_in_world))
 
     def project_to_bev_frame(self,
                              pose_world_frame,
@@ -68,12 +132,7 @@ class PathPlanner:
         origin_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=self._origin_in_world)
         origin_xy_in_world = self._origin_in_world[:2]
 
-        # pose_in_world = [48, 1]
         pose_in_map, map_shape = self.project_to_bev_frame(pose_world_frame=pose_in_world)
-        print(f"pose_in_world: {pose_in_world}")
-        print(f"pose_in_map: {pose_in_map}")
-        print(f"origin_in_map: {origin_in_map}")
-        # time.sleep(123)
 
         # Flip vertically and horizontally
         origin_flipped_in_map = [origin_in_map[0], map_shape[1] - origin_in_map[1] - 1]
@@ -91,11 +150,6 @@ class PathPlanner:
             rot_mat = np.array([[1, 0],
                                 [0, -1]])  # World to Human-readable Frame
             pose_in_map = origin_flipped_in_map + rot_mat @ distance_on_map_world_frame
-
-        # pose_in_map = [pose_in_map_x, pose_in_map_y]
-        # print(f"distance_in_map: {distance_in_map}")
-        # print(f"origin_flipped_in_map: {origin_flipped_in_map}")
-        # print(f"pose_in_map: {pose_in_map}")
 
         return pose_in_map
 
@@ -213,14 +267,64 @@ class PathPlanner:
         xs_raw, us_raw = self._spine.fit_reference(curr_pos_m, next_pos, curr_vel_m, next_vel)
         print(f"xs_raw: {xs_raw}")
         print(f"us_raw: {us_raw}")
-        # time.sleep(5)
 
         return xs_raw, us_raw, stop
 
+    def get_reference_trajectory(self):
+        """Obtain generated reference motion trajectory (vx and wz)"""
+        if len(self._ref_trajectory) == 0:
+            # Generate trajectory (yaw_rate)
+
+            ref_pos, ref_vel, stop_flag = self.navigate_to_goal(goal=self._goal,
+                                                                occupancy_map=self._occupancy_map)
+            # next_pos_trajs = []
+            # for i in range(self._planner.next_pos_trajs.shape[0]):
+            #     pts = self._planner.next_pos_trajs.reshape(-1, 2)[i]
+            #     print(f"pts[{i}]: {pts}")
+            #     pts_in_world = self._planner.map_to_world_frame(pts)
+            #     next_pos_trajs.append(pts_in_world)
+            #     print(f"pts_in_world: {pts_in_world}")
+            # self._draw_path(pts=np.asarray(next_pos_trajs))
+
+            # next_pos_l = []
+            # print(f"self._planner.next_pos_l: {self._planner.next_pos_l}")
+            # print(f"self._planner.next_pos_l: {self._planner.next_pos_l.shape}")
+            # for i in range(self._planner.next_pos_l.shape[0]):
+            #     pts = self._planner.next_pos_l[i]
+            #     print(f"pts[{i}]: {pts}")
+            #     pts_in_world = self._planner.map_to_world_frame(pts)
+            #     next_pos_l.append(pts_in_world)
+            #     print(f"pts_in_world: {pts_in_world}")
+            # self._draw_path(pts=np.asarray(next_pos_l))
+
+            self._stop_flag = stop_flag
+            print(f"ref_pos: {ref_pos}")
+            print(f"ref_vel: {ref_vel}")
+            self._ref_trajectory.extend(ref_vel)
+
+        # Determine to stop or not
+        if self._stop_flag:
+            current_goal = self._goal
+            if len(self.nav_goal_in_world) > 0:
+                self._goal = self.nav_goal_in_world.popleft()
+                self._draw_goals(goal=self._goal, color=(0, 0, 1), size=0.17)
+            else:
+                self._goal = None
+                self.planning_flag = False
+            self._ref_trajectory.clear()
+            self._ref_trajectory.append((0., 0.))
+            print(f"The robot is near the goal, stop!!!")
+            self._draw_goals(goal=current_goal, color=(0, 1, 0), size=0.17)
+
+            self._stop_flag = False
+
+        ut = self._ref_trajectory.popleft()
+        return ut
+
     def navigate_to_goal(self, goal=None, occupancy_map=None):
         """Given the goal in the world, return reference yaw rate and stop flag"""
-        if goal is None and len(self.navigation_goal_in_world) > 0:
-            goal = self.navigation_goal_in_world[0]
+        if goal is None and len(self.nav_goal_in_world) > 0:
+            goal = self.nav_goal_in_world[0]
 
         # Map the goal in world frame to map frame
         map_goal = self.world_to_map_frame(pose_in_world=goal)
@@ -255,3 +359,16 @@ class PathPlanner:
     def goal(self, new_goal):
         print(f"Change previous goal: {self._goal} to new goal: {new_goal}")
         self._goal = new_goal
+
+    def _draw_goals(self, goal, color=(1, 0, 0), size=0.1, env_ids=0):
+        # Red by default
+        sphere_geom = gymutil.WireframeSphereGeometry(size, 32, 32, None, color=color)
+        pose = gymapi.Transform(gymapi.Vec3(goal[0], goal[1], 0), r=None)
+        gymutil.draw_lines(sphere_geom, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
+
+    def _draw_path(self, pts, color=(0, 0, 0), env_ids=0):
+        # Black by default
+        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 32, 32, None, color=color)
+        for i in range(pts.shape[0]):
+            pose = gymapi.Transform(gymapi.Vec3(pts[i, 0], pts[i, 1], 0), r=None)
+            gymutil.draw_lines(sphere_geom, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)

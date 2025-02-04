@@ -43,10 +43,10 @@ def get_env_config():
     config.use_yaw_feedback = False
 
     # Stance controller
-    config.base_position_kp = np.array([0., 0., 25])
-    config.base_position_kd = np.array([5., 5., 5.])
-    config.base_orientation_kp = np.array([25., 25., 0.])
-    config.base_orientation_kd = np.array([5., 5., 5.])
+    config.base_position_kp = np.array([0., 0., 25]) * 2
+    config.base_position_kd = np.array([5., 5., 5.]) * 2
+    config.base_orientation_kp = np.array([25., 25., 0.]) * 2
+    config.base_orientation_kd = np.array([5., 5., 5.]) * 2
     config.qp_foot_friction_coef = 0.7
     config.qp_weight_ddq = np.diag([1., 1., 10., 10., 10., 1.])
     config.qp_body_inertia = np.array([0.14, 0.35, 0.35]) * 1.5
@@ -88,7 +88,7 @@ def get_config():
     """Main entrance for the parsing the config"""
     config = ConfigDict()
     # config.training = ppo.get_training_config()     # Use PPO
-    config.training = ddpg.get_training_config()    # Use DDPG
+    config.training = ddpg.get_training_config()  # Use DDPG
     config.env_class = go2_trot_env.Go2TrotEnv
     config.environment = get_env_config()
     return config

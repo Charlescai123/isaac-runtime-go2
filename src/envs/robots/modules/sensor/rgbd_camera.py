@@ -218,7 +218,7 @@ class RGBDCamera:
                 save_map:   whether to save the generated map
             """
         # Get point cloud data
-        o3d_pcd_wd = self.get_pcd_data(in_world_frame=True, write_ply=True, filename="wd.ply")  # pcd in world frame
+        o3d_pcd_wd = self.get_pcd_data(in_world_frame=True, write_ply=False, filename="wd.ply")  # pcd in world frame
         raw_pcd_wd = np.asarray(o3d_pcd_wd.points)
 
         # camera_tf = self._gym.get_camera_transform(self._sim, self._env_handle, self._camera_handle)

@@ -76,7 +76,7 @@ def main(argv):
     if FLAGS.enable_ha_teacher:
         config.environment.ha_teacher.enable = True
         config.environment.ha_teacher.chi = 0.15
-        config.environment.ha_teacher.tau = 100
+        config.environment.ha_teacher.tau = 150
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -117,11 +117,10 @@ def main(argv):
     # env._torque_optimizer._base_orientation_kp *= 0.5
     # env._torque_optimizer._base_orientation_kd *= 0.5
 
-    # print(f"env._torque_optimizer._base_position_kp: {env._torque_optimizer._base_position_kp}")
-    # print(f"env._torque_optimizer._base_position_kd: {env._torque_optimizer._base_position_kd}")
-    # print(f"env._torque_optimizer._base_orientation_kp: {env._torque_optimizer._base_orientation_kp}")
-    # print(f"env._torque_optimizer._base_orientation_kd: {env._torque_optimizer._base_orientation_kd}")
-
+    print(f"env._torque_optimizer._base_position_kp: {env._torque_optimizer._base_position_kp}")
+    print(f"env._torque_optimizer._base_position_kd: {env._torque_optimizer._base_position_kd}")
+    print(f"env._torque_optimizer._base_orientation_kp: {env._torque_optimizer._base_orientation_kp}")
+    print(f"env._torque_optimizer._base_orientation_kd: {env._torque_optimizer._base_orientation_kd}")
     # time.sleep(1)
     start_time = time.time()
     logs = []

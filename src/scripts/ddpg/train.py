@@ -2,6 +2,8 @@
 
 import time
 
+import numpy as np
+import yaml
 from absl import app
 from absl import flags
 # from absl import logging
@@ -24,6 +26,16 @@ flags.DEFINE_bool("show_gui", True, "whether to show GUI.")
 flags.DEFINE_string("logdir", "logs", "logdir.")
 flags.DEFINE_string("load_checkpoint", None, "checkpoint to load.")
 FLAGS = flags.FLAGS
+
+
+def convert_numpy(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy(i) for i in obj]
+    return obj
 
 
 def main(argv):
@@ -49,7 +61,6 @@ def main(argv):
                            config=config.environment,
                            show_gui=FLAGS.show_gui,
                            use_real_robot=FLAGS.use_real_robot)
-
     # Robot pusher
     if FLAGS.enable_pusher:
         env._pusher.push_enable = True
