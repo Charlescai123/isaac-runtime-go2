@@ -19,16 +19,10 @@ class AbstractDPG(AbstractActorCritic):
             storage_size (int): Maximum size of the replay storage.
         """
         assert action_noise_scale > 0
-        # print(f"kwargs:{kwargs}")
-        # import time
-        # time.sleep(123)
         super().__init__(env, **kwargs)
 
-        # self.storage = ReplayStorage(
-        #     self.env.num_envs, storage_size, device=self.device, initial_size=storage_initial_size
-        # )
         self.storage = ReplayStorage(
-            self.env.num_envs, max_size=int(2e3 * 4096), device=self.device, initial_size=storage_initial_size
+            self.env.num_envs, storage_size, device=self.device, initial_size=storage_initial_size
         )
 
         self._register_serializable("storage")

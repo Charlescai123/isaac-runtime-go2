@@ -11,6 +11,8 @@ from src.envs.robots.modules.planner.FMM import FMMPlanner
 from src.envs.robots.modules.planner.spline import Spline
 from src.envs.robots.modules.planner.utils import get_shortest_path, path_plot
 
+GOALS = [(49, 1.7), (51.6, 0), (55, -1.8), (58, 1)]
+
 
 class PathPlanner:
     def __init__(self,
@@ -18,7 +20,6 @@ class PathPlanner:
                  sim,
                  viewer,
                  num_envs,
-                 planning_flag=True,
                  device="cuda"):
         self._robot = robot
         self._sim = sim
@@ -39,27 +40,33 @@ class PathPlanner:
         self._costmap_for_plot = None
 
         # Planning stuff
-        self.planning_flag = planning_flag
-        self.nav_goal_in_world = deque([(49, 2), (51.5, 2), (53, -.5), (51, -2.5)])
+        self.planning_flag = True
+        self.nav_goal_in_world = deque(GOALS)
         self._ref_trajectory = deque()
         self._stop_flag = False
 
+    def reset(self):
+        # self._occupancy_map = None
+        # self._costmap = None
+        # self._costmap_for_plot = None
+        self._goal = None
+
+        # Planning stuff
+        self.planning_flag = True
+        self.nav_goal_in_world = deque(GOALS)
+        self._ref_trajectory = deque()
+        self._stop_flag = False
+
+        self.clear_goals()
+        self.reset_goals()
+
     def init_map(self):
-
-        # Draw all the goals in the world frame
-        for goal in self.nav_goal_in_world:
-            self._draw_goals(goal=goal, color=(1, 0, 0), size=0.17)  # Use Red to draw all goals
-
-        if self._goal is None and len(self.nav_goal_in_world) > 0:
-            self._goal = self.nav_goal_in_world[0]
-            self._draw_goals(goal=self._goal, color=(0, 0, 1), size=0.17)  # Blue represents the current goal
-
         map_goal = self.world_to_map_frame(pose_in_world=self._goal)
         self._occupancy_map = self._robot.camera_sensor[0].get_bev_map(as_occupancy=True,
                                                                        show_map=False,
                                                                        save_map=False)
         self._costmap, self._costmap_for_plot = self.get_costmap(goal_in_map=map_goal,
-                                                                 show_map=True)
+                                                                 show_map=False)
 
         from scipy.ndimage import gaussian_filter
 
@@ -67,29 +74,38 @@ class PathPlanner:
         # self._costmap = gaussian_filter(self._costmap, sigma=sigma)
         # self._costmap_for_plot = gaussian_filter(self._costmap_for_plot, sigma=sigma)
 
-        curr_pos_w = self._robot.base_position[0, :2]
-        start_pt = self.world_to_map_frame(pose_in_world=curr_pos_w.cpu())
-        start_pt = (int(start_pt[0]), int(start_pt[1]))
-        print(f"start_pt: {start_pt}")
-
-        path = get_shortest_path(distance_map=self._costmap, start_pt=start_pt,
-                                 goal_pt=self._goal)
-        path_in_world = []
-        for i in range(len(path)):
-            path_pts_in_world = self.map_to_world_frame(path[i])
-            path_in_world.append(path_pts_in_world)
-
-        path_plot(distance_map=self._costmap_for_plot, path=path, start=start_pt,
-                  goal=map_goal)  # Plot the shortest path
+        # curr_pos_w = self._robot.base_position[0, :2]
+        # start_pt = self.world_to_map_frame(pose_in_world=curr_pos_w.cpu())
+        # start_pt = (int(start_pt[0]), int(start_pt[1]))
+        # print(f"start_pt: {start_pt}")
+        #
+        # path = get_shortest_path(distance_map=self._costmap, start_pt=start_pt,
+        #                          goal_pt=self._goal)
+        # path_in_world = []
+        # for i in range(len(path)):
+        #     path_pts_in_world = self.map_to_world_frame(path[i])
+        #     path_in_world.append(path_pts_in_world)
+        #
+        # path_plot(distance_map=self._costmap_for_plot, path=path, start=start_pt,
+        #           goal=map_goal)  # Plot the shortest path
 
         # Plot the shortest path in the world frame
         # self._draw_path(pts=np.asarray(path_in_world))
 
+    def reset_goals(self):
+        # Draw all the goals in the world frame
+        for goal in self.nav_goal_in_world:
+            self._draw_goals(goal=goal, color=(1, 0, 0), size=0.17)  # Use Red to draw all goals
+
+        if self._goal is None and len(self.nav_goal_in_world) > 0:
+            self._goal = self.nav_goal_in_world.popleft()
+            self._draw_goals(goal=self._goal, color=(0, 0, 1), size=0.17)  # Blue represents the current goal
+
     def project_to_bev_frame(self,
                              pose_world_frame,
                              grid_size=None,
-                             roi_x_range=(45, 55),
-                             roi_y_range=(-5, 5)):
+                             roi_x_range=(45, 60),
+                             roi_y_range=(-6, 6)):
         """Project the pose in world frame to the gridmap
 
         Below are how the x and y look like in a generated raw BEV image
@@ -168,20 +184,21 @@ class PathPlanner:
 
         return pose_in_world
 
-    def get_costmap(self, goal_in_map, env_idx=0, show_map=False, save_map=False):
+    def get_costmap(self, goal_in_map, occupancy_map=None, env_idx=0, show_map=False, save_map=False):
         """Return the generated costmap from occupancy_map and goal.
 
         Parameters
         ----------
         goal_in_map : 2d array/list
                       target position (BEV frame) on the map with goal = (target_x, target_y)
-
+        occupancy_map: input occupancy_map or not
         env_idx: The envs index for obtaining the robot camera (by default 0)
         show_map: whether to show the cost map
         save_map: whether to save the cost map
 
         """
-        occupancy_map = self._robot.camera_sensor[env_idx].get_bev_map(as_occupancy=True, show_map=False)
+        if occupancy_map is None:
+            occupancy_map = self._robot.camera_sensor[env_idx].get_bev_map(as_occupancy=True, show_map=False)
         _planner = FMMPlanner(occupancy_map, resolution=self._resolution)
         costmap, costmap_for_plot = _planner.set_goal(goal_in_map)
 
@@ -225,7 +242,7 @@ class PathPlanner:
                                                                  as_occupancy=as_occupancy)
         return bev_map
 
-    def generate_ref_trajectory(self, map_goal, occupancy_map=None, env_idx=0):
+    def motion_planning(self, map_goal, occupancy_map=None, env_idx=0):
         if occupancy_map is None:
             occupancy_map = self._get_bev_map(as_occupancy=True, show_map=True)
         self._planner = FMMPlanner(occupancy_map, resolution=self._resolution)
@@ -239,34 +256,34 @@ class PathPlanner:
         # Position and Velocity in Map coordinates
         curr_pos_m = self.world_to_map_frame(pose_in_world=curr_pos_w, bev_frame=True)
         curr_vel_m = curr_vel_w / self._planner.resolution
-        print(f"curr_pos_w: {curr_pos_w}")
-        print(f"curr_pos_m: {curr_pos_m}")
-        print(f"curr_vel_w: {curr_vel_w}")
-        print(f"curr_vel_m: {curr_vel_m}")
+        # print(f"curr_pos_w: {curr_pos_w}")
+        # print(f"curr_pos_m: {curr_pos_m}")
+        # print(f"curr_vel_w: {curr_vel_w}")
+        # print(f"curr_vel_m: {curr_vel_m}")
 
         next_pos_l, next_vel_l, stop = self._planner.get_short_term_goal(pos=curr_pos_m, yaw=yaw,
                                                                          lin_speed=np.linalg.norm(curr_vel_m))
         curr_pos_l = np.stack([curr_pos_m] * next_pos_l.shape[0])
         curr_vel_l = np.stack([curr_vel_m] * next_pos_l.shape[0])
 
-        print(f"next_pos_l: {next_pos_l}")
-        print(f"next_vel_l: {next_vel_l}")
+        # print(f"next_pos_l: {next_pos_l}")
+        # print(f"next_vel_l: {next_vel_l}")
 
         next_pos_trajs = self._spine.fit_eval(curr_pos_l, next_pos_l, curr_vel_l, next_vel_l)
         self.next_pos_trajs = next_pos_trajs
         self.next_pos_l = next_pos_l
 
-        print(f"next_pos_trajs: {next_pos_trajs}")
-        print(f"next_pos_trajs.shape: {next_pos_trajs.shape}")
+        # print(f"next_pos_trajs: {next_pos_trajs}")
+        # print(f"next_pos_trajs.shape: {next_pos_trajs.shape}")
         best_traj_idx = self._planner.find_argmin_traj(next_pos_trajs)
 
         next_pos, next_vel = next_pos_l[best_traj_idx], next_vel_l[best_traj_idx]
-        print(f"next_pos: {next_pos}")
-        print(f"next_vel: {next_vel}")
+        # print(f"next_pos: {next_pos}")
+        # print(f"next_vel: {next_vel}")
 
         xs_raw, us_raw = self._spine.fit_reference(curr_pos_m, next_pos, curr_vel_m, next_vel)
-        print(f"xs_raw: {xs_raw}")
-        print(f"us_raw: {us_raw}")
+        # print(f"xs_raw: {xs_raw}")
+        # print(f"us_raw: {us_raw}")
 
         return xs_raw, us_raw, stop
 
@@ -298,8 +315,6 @@ class PathPlanner:
             # self._draw_path(pts=np.asarray(next_pos_l))
 
             self._stop_flag = stop_flag
-            print(f"ref_pos: {ref_pos}")
-            print(f"ref_vel: {ref_vel}")
             self._ref_trajectory.extend(ref_vel)
 
         # Determine to stop or not
@@ -308,6 +323,10 @@ class PathPlanner:
             if len(self.nav_goal_in_world) > 0:
                 self._goal = self.nav_goal_in_world.popleft()
                 self._draw_goals(goal=self._goal, color=(0, 0, 1), size=0.17)
+                map_goal = self.world_to_map_frame(pose_in_world=self._goal)
+                # self._costmap, self._costmap_for_plot = self.get_costmap(goal_in_map=map_goal,
+                #                                                          occupancy_map=self._occupancy_map,
+                #                                                          show_map=True)
             else:
                 self._goal = None
                 self.planning_flag = False
@@ -347,8 +366,7 @@ class PathPlanner:
             # self._costmap = gaussian_filter(self._costmap, sigma=sigma)
             # self._costmap_for_plot = gaussian_filter(self._costmap_for_plot, sigma=sigma)
 
-        ref_pos, ref_vel, stop_flag = self.generate_ref_trajectory(map_goal=map_goal,
-                                                                   occupancy_map=occupancy_map)
+        ref_pos, ref_vel, stop_flag = self.motion_planning(map_goal=map_goal, occupancy_map=occupancy_map)
         return ref_pos, ref_vel, stop_flag
 
     @property
@@ -372,3 +390,6 @@ class PathPlanner:
         for i in range(pts.shape[0]):
             pose = gymapi.Transform(gymapi.Vec3(pts[i, 0], pts[i, 1], 0), r=None)
             gymutil.draw_lines(sphere_geom, self._gym, self._viewer, self._robot.env_handles[env_ids], pose)
+
+    def clear_goals(self):
+        self._gym.clear_lines(self._viewer)

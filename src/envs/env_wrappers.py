@@ -42,7 +42,6 @@ class RangeNormalize(AttributeModifier):
 
     def step(self, drl_action):
         # action = self._denormalize_action(action)
-        import numpy as np
 
         magnitude = to_torch([4, 4, 2, 8, 8, 4], device=self._device) * 0.5  # 6 dims
         # magnitude = to_torch([4, 4, 2, 8, 2, 0.], device=self._device) * 2 # 6 dims

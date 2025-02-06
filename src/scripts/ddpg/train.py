@@ -8,6 +8,8 @@ from absl import app
 from absl import flags
 # from absl import logging
 from isaacgym import gymapi, gymutil
+import torch
+
 from datetime import datetime
 import os
 
@@ -54,7 +56,7 @@ def main(argv):
     if FLAGS.enable_ha_teacher:
         config.environment.ha_teacher.enable = True
         config.environment.ha_teacher.chi = 0.15
-        config.environment.ha_teacher.tau = 50
+        config.environment.ha_teacher.tau = 40
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -67,11 +69,21 @@ def main(argv):
 
     env = env_wrappers.RangeNormalize(env)
 
+    mean_pos = torch.min(env.robot.base_position_world, dim=0)[0].cpu().numpy() + np.array([-2.5, -2.5, 2.5])
+    # mean_pos = torch.min(self.base_position_world,
+    #                      dim=0)[0].cpu().numpy() + np.array([0.5, -1., 0.])
+    target_pos = torch.mean(env.robot.base_position_world, dim=0).cpu().numpy() + np.array([0., 2., -0.5])
+    cam_pos = gymapi.Vec3(*mean_pos)
+    cam_target = gymapi.Vec3(*target_pos)
+    env.robot._gym.viewer_camera_look_at(env.robot._viewer, None, cam_pos, cam_target)
+    env.robot._gym.step_graphics(env.robot._sim)
+    env.robot._gym.draw_viewer(env.robot._viewer, env.robot._sim, True)
+
     ddpg_runner = OffPolicyRunner(env, config.training, logdir, device=device)
     if FLAGS.load_checkpoint:
         ddpg_runner.load(FLAGS.load_checkpoint)
     ddpg_runner.learn(num_learning_iterations=config.training.runner.max_iterations,
-                      init_at_random_ep_len=True)
+                      init_at_random_ep_len=False)
 
 
 if __name__ == "__main__":

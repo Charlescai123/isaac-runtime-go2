@@ -185,9 +185,9 @@ class RGBDCamera:
         return result
 
     def get_bev_map(self,
-                    roi_x_range=(45, 55),
-                    roi_y_range=(-5, 5),
-                    roi_z_range=(-20, 20),
+                    roi_x_range=(45, 60),
+                    roi_y_range=(-6, 6),
+                    roi_z_range=(-1.5, 1.5),
                     grid_size=0.015,
                     reverse_xy=True,
                     show_map=False,
@@ -286,9 +286,7 @@ class RGBDCamera:
             z_height_feasible_mask = np.logical_and((interp_grid.copy() > z_low), (interp_grid.copy() < z_high))
             occupancy_map = np.ones([x_bins, y_bins], dtype=np.uint8) * z_height_feasible_mask
 
-            # occupancy_map[0:125, 200:220] = 1      # Manually fill the free-space for robot (optional)
-            occupancy_map[0:140, 200:465] = 1  # Manually fill the free-space for robot (optional) resolution = 0.015
-            # occupancy_map[0:70, 100:232] = 1  # Manually fill the free-space for robot (optional) resolution = 0.03
+            occupancy_map[0:140, 265:535] = 1  # Manually fill the free-space for robot (optional) resolution = 0.015
 
             bev_map = occupancy_map
 
@@ -490,95 +488,6 @@ class RGBDCamera:
         self._gym.end_access_image_tensors(self._sim)
 
         return point_cloud
-
-    def get_vision_observation(self):
-        width = self._img_width
-        height = self._img_height
-        # fov = 90
-        # near_val = 0.1
-        # far_val = 5
-
-        proj_mat = self._gym.get_camera_proj_matrix(self._sim, self._env_handle, self._camera_handle)
-
-        cam_transform = self._gym.get_camera_transform(self._sim, self._env_handle, self._camera_handle)
-        cam_pos = cam_transform.p
-        cam_orn = cam_transform.r
-
-        view_mat2 = self._gym.get_camera_view_matrix(self._sim, self._env_handle, self._camera_handle)
-
-        self._gym.render_all_camera_sensors(self._sim)
-        self._gym.render_all_camera_sensors(self._sim)
-        self._gym.start_access_image_tensors(self._sim)
-
-        color_image = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_COLOR)
-        # depth_tensor = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle,
-        #                                          gymapi.IMAGE_DEPTH)
-        depth_image_ = self._gym.get_camera_image_gpu_tensor(self._sim,
-                                                             self._env_handle,
-                                                             self._camera_handle,
-                                                             gymapi.IMAGE_DEPTH)
-
-        torch_camera_depth_tensor = gymtorch.wrap_tensor(depth_image_)
-        # Clamp depth values to the range [near_plane, far_plane]
-        near_plane = 0.1
-        far_plane = 10.0
-        # torch_camera_depth_tensor = torch.clamp(torch_camera_depth_tensor, min=near_plane, max=far_plane)
-        # print(f"torch_camera_depth_tensor: {torch_camera_depth_tensor}")
-
-        _depth_img = torch_camera_depth_tensor.clone().cpu().numpy()
-
-        self._gym.end_access_image_tensors(self._sim)
-
-        rgba_image = np.frombuffer(color_image, dtype=np.uint8).reshape(self._img_height, self._img_width, 4)
-
-        rgb_image = rgba_image[:, :, :3]
-        # print(f"rgb_image: {rgb_image}")
-
-        # color_img = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_COLOR)
-        # depth_img = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_DEPTH)
-
-        seg_img = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle,
-                                             gymapi.IMAGE_SEGMENTATION)
-
-        self._gym.render_all_camera_sensors(self._sim)
-        self._gym.start_access_image_tensors(self._sim)
-
-        color_image = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_COLOR)
-        # depth_tensor = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle,
-        #                                          gymapi.IMAGE_DEPTH)
-        depth_image_ = self._gym.get_camera_image_gpu_tensor(self._sim,
-                                                             self._env_handle,
-                                                             self._camera_handle,
-                                                             gymapi.IMAGE_DEPTH)
-
-        torch_camera_depth_tensor = gymtorch.wrap_tensor(depth_image_)
-
-        _depth_img = torch_camera_depth_tensor.clone().cpu().numpy()
-
-        # depth_image = gymtorch.wrap_tensor(depth_image_)
-        # depth_image = self.process_depth_image(depth_image, i)
-
-        self._gym.end_access_image_tensors(self._sim)
-
-        color_img = color_image
-        rgba_img = np.frombuffer(color_img, dtype=np.uint8).reshape(self._img_height, self._img_width, 4)
-
-        # rgb_img = rgba_img[:, :, :3]
-        # print(f"rgb_image: {rgb_image}")
-
-        # time.sleep(1)
-        # optical_flow_in_pixels = np.zeros(np.shape(optical_flow_image))
-        # # Horizontal (u)
-        # optical_flow_in_pixels[0, 0] = image_width * (optical_flow_image[0, 0] / 2 ** 15)
-        # # Vertical (v)
-        # optical_flow_in_pixels[0, 1] = image_height * (optical_flow_image[0, 1] / 2 ** 15)
-
-        depth_normalized = cv2.normalize(_depth_img, None, 0, 1, cv2.NORM_MINMAX).astype(np.float32)
-        # depth_colored = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
-        np.savetxt("depth_normalized.txt", depth_normalized, fmt="%.6f")
-
-        # time.sleep(123)
-        return rgba_img, depth_normalized, seg_img
 
     def save_img(self, img_data, filename, folder="./data/perception"):
         os.makedirs(folder, exist_ok=True)

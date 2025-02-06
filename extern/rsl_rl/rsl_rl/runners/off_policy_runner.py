@@ -5,6 +5,7 @@ import statistics
 
 from torch.utils.tensorboard import SummaryWriter
 import torch
+from tqdm import tqdm
 
 from rsl_rl.algorithms.ddpg import DDPG
 from rsl_rl.modules import ActorCritic, ActorCriticRecurrent
@@ -21,7 +22,6 @@ class OffPolicyRunner:
 
         self.cfg = train_cfg["runner"]
         self.alg_cfg = train_cfg["algorithm"]
-        self.policy_cfg = train_cfg["policy"]
         self.device = device
         self.env = env
 
@@ -30,19 +30,10 @@ class OffPolicyRunner:
         else:
             num_critic_obs = self.env.num_obs
         actor_critic_class = eval(self.cfg["policy_class_name"])  # ActorCritic
-        # actor_critic: ActorCritic = actor_critic_class(self.env.num_obs,
-        #                                                num_critic_obs,
-        #                                                self.env.num_actions,
-        #                                                **self.policy_cfg).to(self.device)
         alg_class = eval(self.cfg["algorithm_class_name"])  # DDPG
-        # self.alg: DDPG = alg_class(env, device=self.device, **self.alg_cfg)
-        self.alg: DDPG = alg_class(env, device=self.device)
+        self.alg: DDPG = alg_class(env, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
-
-        # init storage and model
-        self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, [self.env.num_obs],
-                              [self.env.num_privileged_obs], [self.env.num_actions])
 
         # Log
         self.log_dir = log_dir
@@ -73,31 +64,23 @@ class OffPolicyRunner:
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         total_iter = self.current_learning_iteration + num_learning_iterations
-        for it in range(self.current_learning_iteration, total_iter):
-
-            transitions_list = []
+        for it in tqdm(range(self.current_learning_iteration, total_iter)):
 
             start = time.time()
             # Rollout
             # with torch.inference_mode():
 
             for i in range(self.num_steps_per_env):
+
                 drl_actions = self.alg.act(obs, critic_obs)
                 prev_obs = self.env.get_observations()
                 obs, privileged_obs, actions, rewards, dones, infos = self.env.step(drl_actions)
-                # print(f"prev_obs: {prev_obs}")
-                # print(f"next_obs: {obs}")
-                # print(f"infos: {infos}")
                 critic_obs = privileged_obs if privileged_obs is not None else obs
                 prev_obs, obs, critic_obs, actions, rewards, dones = prev_obs.to(self.device), obs.to(
                     self.device), critic_obs.to(self.device), actions.to(self.device), rewards.to(
                     self.device), dones.to(self.device)
-                # self.alg.process_env_step(rewards, dones, infos)
-                print(f"rewards: {rewards}")
-                print(f"rewards: {rewards.shape}")
-                transitions_list.append(
-                    self.alg.process_env_step2(prev_obs=prev_obs, obs=obs, actions=actions, rewards=rewards,
-                                               dones=dones, infos=infos))
+
+                # print(f"rewards: {rewards}")
 
                 if self.log_dir is not None:
                     # Book keeping
@@ -113,14 +96,17 @@ class OffPolicyRunner:
 
                 stop = time.time()
                 collection_time = stop - start
-                mean_value_loss, mean_surrogate_loss = self.alg.update([transitions_list[-1]])
+
+                # Save dataset to replay buffer
+                dataset = self.alg.to_transition(prev_obs=prev_obs, obs=obs, actions=actions, rewards=rewards,
+                                                 dones=dones, infos=infos)
+                # DDPG Update and return loss
+                stats = self.alg.update([dataset])
+                mean_value_loss, mean_surrogate_loss = stats["critic"], stats["actor"]
 
                 # Learning step
                 start = stop
-                # self.alg.compute_returns(critic_obs)
 
-            # mean_value_loss, mean_surrogate_loss = self.alg.update(transitions_list)
-            # self.alg.trans_list.clear()
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:

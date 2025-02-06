@@ -38,12 +38,11 @@ class ReplayStorage(Storage):
             value (torch.Tensor): The value of the item.
         """
         value = self._process(name, value.clone().to(self.device))
-
         if name not in self._data:
             if self._full or self._idx != 0:
                 raise ValueError(f'Tried to store invalid transition data for "{name}".')
             self._data[name] = torch.empty(
-                self._size * self._env_count, *value.shape[1:], device=self.device, dtype=value.dtype
+                int(self._size * self._env_count), *value.shape[1:], device=self.device, dtype=value.dtype
             )
 
         start_idx = self._idx * self._env_count
@@ -110,7 +109,7 @@ class ReplayStorage(Storage):
         if not self._initialized:
             return
 
-        max_idx = self._env_count * (self._size if self._full else self._idx)
+        max_idx = int(self._env_count * (self._size if self._full else self._idx))
 
         for _ in range(batch_count):
             batch_idx = torch.randint(high=max_idx, size=(batch_size,))

@@ -1,0 +1,22 @@
+newmtl LiveOakBark_Mat
+	Ka 0 0 0
+	Kd 1 1 1
+	Ke 0 0 0
+	illum 2
+	Ks 0.2 0.2 0.2
+	Ns 20
+	d 1
+	Tr 0
+	map_Kd LiveOakBark.jpg
+	norm LiveOakBark_Normal.jpg
+newmtl Sample_Bark_2_Mat
+	Ka 0 0 0
+	Kd 1 1 1
+	Ke 0 0 0
+	illum 2
+	Ks 0.2 0.2 0.2
+	Ns 20
+	d 1
+	Tr 0
+	map_Kd Sample_Bark_2.jpg
+	norm Sample_Bark_2_Normal.jpg

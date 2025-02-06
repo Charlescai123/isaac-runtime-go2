@@ -15,7 +15,7 @@ IsaacGym)
 * [x] Add BEV map to the repo
 * [x] Fast Marching Method (FMM) implementation
 * [ ] Incorporate more challenging scenarios
-  * [ ] Dense forests (sandy terrain, trees)
+  * [x] Dense forests (sandy terrain, trees)
   * [ ] inclined staircases, and rainy conditions
 * [ ] Go2 real robot deployment
   * [ ] Gazebo real-time testing

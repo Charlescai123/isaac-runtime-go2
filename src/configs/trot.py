@@ -43,7 +43,7 @@ def get_env_config():
     config.use_yaw_feedback = False
 
     # Stance controller
-    config.base_position_kp = np.array([0., 0., 25]) * 2
+    config.base_position_kp = np.array([0., 0., 25.]) * 2
     config.base_position_kd = np.array([5., 5., 5.]) * 2
     config.base_orientation_kp = np.array([25., 25., 0.]) * 2
     config.base_orientation_kd = np.array([5., 5., 5.]) * 2

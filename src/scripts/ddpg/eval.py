@@ -76,7 +76,7 @@ def main(argv):
     if FLAGS.enable_ha_teacher:
         config.environment.ha_teacher.enable = True
         config.environment.ha_teacher.chi = 0.15
-        config.environment.ha_teacher.tau = 150
+        config.environment.ha_teacher.tau = 50
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -144,7 +144,7 @@ def main(argv):
 
             # Add beta noise
             print(f"pre action is: {action}")
-            # action = add_beta_noise(action=action)
+            action = add_beta_noise(action=action)
             print(f"action after adding noise is: {action}")
 
             # print(f"action is: {type(action)}")

@@ -20,6 +20,7 @@ from src.envs.robots.modules.planner.path_planner import PathPlanner
 from src.envs.robots.modules.planner.utils import get_shortest_path, path_plot
 from src.envs.robots.motors import MotorControlMode, concatenate_motor_actions
 from src.envs.terrains.wild_env import WildTerrainEnv
+from src.envs.terrains.wild_env_test1 import WildTerrainEnvTest1
 from src.ha_teacher.ha_teacher import HATeacher
 from src.coordinator.coordinator import Coordinator
 from src.physical_design import MATRIX_P
@@ -139,7 +140,8 @@ class Go2TrotEnv:
             init_positions=self._init_positions,
             sim=self._sim,
             viewer=self._viewer,
-            world_env=WildTerrainEnv,
+            # world_env=WildTerrainEnv,
+            world_env=WildTerrainEnvTest1,
             sim_config=self._sim_conf,
             motor_control_mode=MotorControlMode.HYBRID,
             motor_torque_delay_steps=self._config.get('motor_torque_delay_steps', 0)
@@ -213,7 +215,6 @@ class Go2TrotEnv:
                                     sim=self._sim,
                                     viewer=self._viewer,
                                     num_envs=self._num_envs,
-                                    planning_flag=True,
                                     device=self._device)
 
         # Episode statistics
@@ -282,29 +283,25 @@ class Go2TrotEnv:
         self._extras["time_outs"] = self._episode_terminated()
         if env_ids.shape[0] > 0:
             self._extras["episode"] = {}
-            print(f"self._gait_generator.true_phase[env_ids]: {self._gait_generator.true_phase[env_ids]}")
-            # time.sleep(123)
             self._extras["episode"]["cycle_count"] = torch.mean(
                 self._gait_generator.true_phase[env_ids]) / (2 * torch.pi)
 
-            self._obs_buf = self._get_observations()
-            self._privileged_obs_buf = self._get_privileged_observations()
-
             self._step_count[env_ids] = 0
             self._cycle_count[env_ids] = 0
-            # self._init_yaw[env_ids] = self._robot.base_orientation_rpy[env_ids, 2]
             self._init_yaw[env_ids] = 0
 
             self._robot.reset_idx(env_ids)
             self._swing_leg_controller.reset_idx(env_ids)
             self._gait_generator.reset_idx(env_ids)
+            self._planner.reset()
 
             self._obs_buf = self._get_observations()
+            self._privileged_obs_buf = self._get_privileged_observations()
 
         return self._obs_buf, self._privileged_obs_buf
 
     def step(self, drl_action: torch.Tensor):
-
+        print(f"step_cnt: {self._step_count}")
         # print(f"action is: {action}")
         self._last_obs_buf = torch.clone(self._obs_buf)
 
@@ -332,18 +329,17 @@ class Go2TrotEnv:
             if self._planner.planning_flag:
 
                 if self._step_count == 0:
-                    self._planner.init_map()  # Initialize the map
-
+                    self._planner.init_map()
                 # Take the trajectory generated from the planner
                 ut = self._planner.get_reference_trajectory()
                 vel_x = ut[0] * 1
                 ref_wz = ut[1] * 1
 
                 # Set desired command
-                self.desired_vx = 0.6
+                self.desired_vx = 0.5
                 # self.desired_vx = vel_x
                 self.desired_wz = ref_wz
-                clip_wz = 1
+                clip_wz = 0.6
                 self.desired_wz = np.clip(ref_wz, -clip_wz, clip_wz)
             else:
                 self.desired_vx = 0.
@@ -380,14 +376,13 @@ class Go2TrotEnv:
 
             # HA-Teacher action
             ha_action, dwell_flag = self.ha_teacher.get_action()
-            # ha_action = to_torch(ha_action, device=self._device)
 
             # Use Normal Kp Kd
             # ha_action = self._desired_acc.squeeze()
 
-            print(f"hp_action: {hp_action}")
-            print(f"ha_action: {ha_action}")
-            print(f"self._torque_optimizer.tracking_error: {self._torque_optimizer.tracking_error}")
+            # print(f"hp_action: {hp_action}")
+            # print(f"ha_action: {ha_action}")
+            # print(f"self._torque_optimizer.tracking_error: {self._torque_optimizer.tracking_error}")
             terminal_stance_ddq, action_mode = self.coordinator.get_terminal_action(hp_action=hp_action,
                                                                                     ha_action=ha_action,
                                                                                     plant_state=self._torque_optimizer.tracking_error,
@@ -395,8 +390,8 @@ class Go2TrotEnv:
                                                                                     epsilon=self.ha_teacher.epsilon)
 
             terminal_stance_ddq = to_torch(terminal_stance_ddq, device=self._device)
-            print(f"terminal_stance_ddq: {terminal_stance_ddq}")
-            print(f"action_mode: {action_mode}")
+            # print(f"terminal_stance_ddq: {terminal_stance_ddq}")
+            # print(f"action_mode: {action_mode}")
 
             # Action mode indices
             hp_indices = torch.argwhere(action_mode == ActionMode.STUDENT.value).squeeze(-1)
@@ -404,8 +399,8 @@ class Go2TrotEnv:
             hp_motor_action = None
             ha_motor_action = None
 
-            print(f"hp_indices: {hp_indices}")
-            print(f"ha_indices: {ha_indices}")
+            # print(f"hp_indices: {hp_indices}")
+            # print(f"ha_indices: {ha_indices}")
 
             # HP-Student in Control
             if len(hp_indices) > 0:
@@ -415,7 +410,7 @@ class Go2TrotEnv:
                     swing_foot_position=desired_foot_positions[hp_indices],
                     generated_acc=terminal_stance_ddq[hp_indices]
                 )
-                # self.robot.set_robot_base_color(color=(0, 0, 1), env_ids=hp_indices)  # Display Blue
+                self.robot.set_robot_base_color(color=(0, 0, 1), env_ids=hp_indices)  # Display Blue
                 nominal_actions[hp_indices] = drl_action  # Nominal actions for HP-student
 
             # HA-Teacher in Control
@@ -426,7 +421,7 @@ class Go2TrotEnv:
                     swing_foot_position=desired_foot_positions[ha_indices],
                     safe_acc=terminal_stance_ddq[ha_indices]
                 )
-                # self.robot.set_robot_base_color(color=(1, 0, 0), env_ids=ha_indices)  # Display Red
+                self.robot.set_robot_base_color(color=(1, 0, 0), env_ids=ha_indices)  # Display Red
                 # Nominal actions for HP-student
                 nominal_actions[ha_indices] = ha_action[ha_indices] - self._desired_acc[ha_indices]
 
@@ -548,9 +543,7 @@ class Go2TrotEnv:
 
             # import pdb
             # pdb.set_trace()
-            # self._resample_command(env_ids_to_resample)
             if not self._use_real_robot:
-                # print(f"dones: {dones}")
                 self.reset_idx(dones.nonzero(as_tuple=False).flatten())
                 pass
 
@@ -645,9 +638,10 @@ class Go2TrotEnv:
             # self._robot.projected_gravity[:, 2] < gravity_threshold,
             to_torch(False, dtype=torch.bool, device=self._device),
             self._robot.base_position[:, 2] < self._config.get('terminate_on_height', 0.15))
-        if torch.any(is_unsafe):
-            print(f"self._robot.projected_gravity[:, 2]: {self._robot.projected_gravity[:, 2]}")
-            print(f" self._robot.base_position[:, 2]: {self._robot.base_position[:, 2]}")
+
+        # Navigation is done
+        if self._planner.planning_flag is False:
+            is_unsafe = torch.logical_or(is_unsafe, to_torch(True, dtype=torch.bool, device=self._device))
 
         if self._config.get('terminate_on_body_contact', False):
             is_unsafe = torch.logical_or(is_unsafe, self._robot.has_body_contact)

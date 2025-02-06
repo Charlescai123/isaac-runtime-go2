@@ -35,7 +35,7 @@ def get_dist(sx, sy, step_size):
 
 
 class FMMPlanner:
-    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=350, obstacle_dist_ratio=1,
+    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=450, obstacle_dist_ratio=1,
                  resolution=0.015):
         self.traversable = traversable
         self.fmm_dist = None
@@ -105,20 +105,21 @@ class FMMPlanner:
 
     def get_short_term_goal(self, pos, yaw, lin_speed):
         pos_int = [int(x) for x in pos]
-        print(f"pos_int: {pos_int}")
-        print(f"costs on map: {self.fmm_dist[pos_int[0], pos_int[1]]}")
-        # time.sleep(1)
 
-        if self.fmm_dist[pos_int[0], pos_int[1]] < 0.5 / self.resolution:  # 0.25 m
+        # Restrict to the occupancy map district
+        pos_int[0] = max(0, min(pos_int[0], self.fmm_dist.shape[0]))
+        pos_int[1] = max(0, min(pos_int[1], self.fmm_dist.shape[1]))
+
+        # Threshold
+        # arrival_radius = 0.4
+        arrival_radius = 0.6
+        if self.fmm_dist[pos_int[0], pos_int[1]] < arrival_radius / self.resolution:  # 0.25 m
             stop = True
         else:
             stop = False
 
         # step_sizes = (lin_speed + self.speeds) / 2 * self.conservative_step_size_factor
-        wtf = np.linspace(np.maximum(lin_speed - 0.4, 0.05),
-                          np.minimum(lin_speed + 0.4, 0.95),
-                          num=10)
-        print(f"wtf: {wtf}")
+
         # step_sizes = (lin_speed + np.linspace(np.maximum(lin_speed - 0.4, 0.05),
         #                                       np.minimum(lin_speed + 0.4, 0.95),
         #                                       num=10) / self.resolution) / 2  # [n_step]
@@ -126,8 +127,8 @@ class FMMPlanner:
                                               np.minimum(lin_speed + 0.4, 0.95),
                                               num=10)) / 2  # [n_step]
 
-        print('speed: ', lin_speed)
-        print(f"step_sizes: {step_sizes}")
+        # print('speed: ', lin_speed)
+        # print(f"step_sizes: {step_sizes}")
         fovs_w = yaw + self.fovs
         fovs_w_1d = fovs_w[np.newaxis, :]
         next_pos = (np.stack([np.cos(fovs_w_1d), np.sin(fovs_w_1d)], axis=-1) *
@@ -141,18 +142,18 @@ class FMMPlanner:
 
         next_pos = np.stack([next_pos] * len(self.small_fovs), axis=2)
 
-        print(f"fovs_w: {fovs_w}")
-        print(f"fovs_w_1d: {fovs_w_1d}")
-        print(f"next_pos: {next_pos}")
-        print(f"next_vel: {next_vel}")
-        print(f"local_vel_angle: {local_vel_angle}")
+        # print(f"fovs_w: {fovs_w}")
+        # print(f"fovs_w_1d: {fovs_w_1d}")
+        # print(f"next_pos: {next_pos}")
+        # print(f"next_vel: {next_vel}")
+        # print(f"local_vel_angle: {local_vel_angle}")
 
         next_pos_l = next_pos.reshape(-1, 2)
         next_vel_l = next_vel.reshape(-1, 2)
 
-        print(f"pos: {pos}")
-        print(f"yaw: {yaw}")
-        print(f"lin_speed: {lin_speed}")
+        # print(f"pos: {pos}")
+        # print(f"yaw: {yaw}")
+        # print(f"lin_speed: {lin_speed}")
         # time.sleep(5)
 
         return next_pos_l, next_vel_l, stop
@@ -175,13 +176,13 @@ class FMMPlanner:
     def find_argmin_traj(self, pos_trajs):
         T = pos_trajs.shape[1]
         flat_pos_trajs = pos_trajs.reshape(-1, 2)
-        print(f"flag_pos_trajs: {flat_pos_trajs}")
+        # print(f"flag_pos_trajs: {flat_pos_trajs}")
         flat_pos_trajs = flat_pos_trajs[::-1]
         fmm_values = self.get_fmm_value(flat_pos_trajs)
         traj_cost = fmm_values.reshape(-1, T)
         argmin_idx = np.argmin(np.sum(traj_cost, axis=-1))
-        print(f"fmm_values: {fmm_values}")
-        print(f"argmin_idx: {argmin_idx}")
+        # print(f"fmm_values: {fmm_values}")
+        # print(f"argmin_idx: {argmin_idx}")
 
         return argmin_idx
 

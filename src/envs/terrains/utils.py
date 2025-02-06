@@ -7,6 +7,11 @@ from isaacgym.terrain_utils import *
 ASSET_ROOT = "resources/terrains"
 
 STONE_ASSET = "stone.urdf"
+STOPSIGN_ASSET = "stopsign.urdf"
+TEST_ITEM_ASSET = "tree/deadwood.urdf"
+SNOW_TREE_ASSET = "tree/snow_tree/snow_tree.urdf"
+OAK_TREE_ASSET = "tree/oak_tree/oak_tree.urdf"
+DEAD_WOOD_ASSET = "tree/deadwood/deadwood.urdf"
 CEMENT_ROAD_ASSET = "plane/cement_road.urdf"
 
 
@@ -21,80 +26,80 @@ def random_quaternion():
     return np.array([w, x, y, z])
 
 
-def load_cement_road_asset(gym, sim, env, name="cement_road", collision_group=-1, collision_filter=-1, pos=(0, 0, 0),
-                           rot=(0, 0, 0, 1), apply_texture=True, scale=1.):
-    x, y, z = pos[:]
-    X, Y, Z, W = rot[:]
-    transform = gymapi.Transform(p=gymapi.Vec3(x, y, z), r=gymapi.Quat(X, Y, Z, W))
+def load_asset(gym, sim, env, asset_urdf, name, pos=(0, 0, 0), rot=(0, 0, 0, 1), scale=1.,
+               collision_group=-1, collision_filter=-1, fix_base_link=False, apply_texture=True,
+               override_inertia=False, override_com=False, disable_gravity=False):
+    """
+    Generic function to load assets in Isaac Gym.
 
-    asset_root = ASSET_ROOT
-    asset_urdf = CEMENT_ROAD_ASSET
+    Parameters:
+        gym (GymAPI): Isaac Gym API handle
+        sim (SimAPI): Simulation environment
+        env (EnvAPI): The environment where the asset will be loaded
+        asset_urdf (str): Path to the asset URDF file
+        name (str): Name of the asset
+        pos (tuple): Asset's world coordinates (x, y, z)
+        rot (tuple): Asset's rotation (quaternion) (x, y, z, w)
+        scale (float): Scale factor of the asset
+        collision_group (int): Collision group ID
+        collision_filter (int): Collision filter ID
+        fix_base_link (bool): Whether to fix the base link
+        apply_texture (bool): Whether to apply texture materials
+        override_inertia (bool): Whether to override inertia
+        override_com (bool): Whether to override the center of mass
+        disable_gravity (bool): Whether to disable gravity
+    """
+    # Set the transform
+    transform = gymapi.Transform(
+        p=gymapi.Vec3(*pos),
+        r=gymapi.Quat(*rot)
+    )
+
+    # Set asset options
     asset_options = gymapi.AssetOptions()
-
-    # Load materials from meshes
     asset_options.use_mesh_materials = apply_texture
     asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-
-    # Override the bogus inertia tensors and center-of-mass properties in the YCB assets.
-    # These flags will force the inertial properties to be recomputed from geometry.
-    asset_options.override_inertia = False
-    asset_options.override_com = False
-    asset_options.fix_base_link = True
-    asset_options.disable_gravity = False
-
-    # use default convex decomposition params
-    # asset_options.vhacd_enabled = True
-    asset_cement_road = gym.load_asset(sim, asset_root, asset_urdf, asset_options)
-
-    # create actor
-    actor_cement_road = gym.create_actor(env, asset_cement_road, transform, name, collision_group, collision_filter)
-    scale_status = gym.set_actor_scale(env, actor_cement_road, scale)
-    # scale_status = False
-    # if scale_status:
-    #     print(f"Set cement road actor scale successfully")
-    # else:
-    #     warnings.warn(f"Failed to set the actor scale")
-
-    return actor_cement_road
-
-
-def load_stone_asset(gym, sim, env, name="stone", pos=(0, 0, 0), rot=(0, 0, 0, 1), scale=1., collision_group=-1,
-                     collision_filter=-1, fix_base_link=False, apply_texture=True, override_inertia=False,
-                     override_com=False, disable_gravity=False):
-    x, y, z = pos[:]
-    X, Y, Z, W = rot[:]
-    transform = gymapi.Transform(p=gymapi.Vec3(x, y, z), r=gymapi.Quat(X, Y, Z, W))
-
-    asset_root = ASSET_ROOT
-    asset_urdf = STONE_ASSET
-    asset_options = gymapi.AssetOptions()
-
-    # Load materials from meshes
-    asset_options.default_dof_drive_mode = 0
-    asset_options.use_mesh_materials = apply_texture
-    asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-
-    # Override the bogus inertia tensors and center-of-mass properties in the YCB assets.
-    # These flags will force the inertial properties to be recomputed from geometry.
     asset_options.override_inertia = override_inertia
     asset_options.override_com = override_com
     asset_options.fix_base_link = fix_base_link
     asset_options.disable_gravity = disable_gravity
 
-    # use default convex decomposition params
-    # asset_options.vhacd_enabled = True
-    asset_stone = gym.load_asset(sim, asset_root, asset_urdf, asset_options)
+    # Load the asset
+    asset = gym.load_asset(sim, ASSET_ROOT, asset_urdf, asset_options)
 
-    # create actor
-    actor_stone = gym.create_actor(env, asset_stone, transform, name, collision_group, collision_filter)
-    scale_status = gym.set_actor_scale(env, actor_stone, scale)
-    # scale_status = False
-    # if scale_status:
-    #     print(f"Set stone actor scale successfully")
-    # else:
-    #     warnings.warn(f"Failed to set the actor scale")
+    # Create actor
+    actor = gym.create_actor(env, asset, transform, name, collision_group, collision_filter)
 
-    return actor_stone
+    # Set scaling
+    scale_status = gym.set_actor_scale(env, actor, scale)
+    if not scale_status:
+        warnings.warn(f"Failed to set scale for {name}")
+
+    return actor
+
+
+def load_cement_road_asset(gym, sim, env, **kwargs):
+    return load_asset(gym, sim, env, CEMENT_ROAD_ASSET, **kwargs)
+
+
+def load_stone_asset(gym, sim, env, **kwargs):
+    return load_asset(gym, sim, env, STONE_ASSET, **kwargs)
+
+
+def load_dead_wood_asset(gym, sim, env, **kwargs):
+    return load_asset(gym, sim, env, DEAD_WOOD_ASSET, **kwargs)
+
+
+def load_oak_tree_asset(gym, sim, env, **kwargs):
+    return load_asset(gym, sim, env, OAK_TREE_ASSET, **kwargs)
+
+
+def load_snow_tree_asset(gym, sim, env, **kwargs):
+    return load_asset(gym, sim, env, SNOW_TREE_ASSET, **kwargs)
+
+
+def load_stop_sign_asset(gym, sim, env, **kwargs):
+    return load_asset(gym, sim, env, STOPSIGN_ASSET, **kwargs)
 
 
 def add_uneven_terrains(gym, sim, scene_offset_x=0, scene_offset_y=0, reverse=False):
