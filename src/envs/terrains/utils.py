@@ -4,6 +4,8 @@ import numpy as np
 from isaacgym import gymtorch, gymapi
 from isaacgym.terrain_utils import *
 
+from src.envs.terrains.sim_utils import add_ground, add_terrain
+
 ASSET_ROOT = "resources/terrains"
 
 STONE_ASSET = "stone.urdf"
@@ -208,3 +210,12 @@ def arrow_plot(self, robot_pos=None):
 
     num_lines = len(line_vertices) // 2
     self._gym.add_lines(self._viewer, env, num_lines, line_vertices, colors)
+
+
+def create_slope_terrain(gym, sim):
+    """Creation of a slope terrain (e.g., stairs)"""
+    add_ground(gym, sim)
+    add_terrain(gym, sim, "stair")
+    add_terrain(gym, sim, "slope")
+    add_terrain(gym, sim, "stair", 3.95, True)
+    add_terrain(gym, sim, "stair", 0., True)

@@ -107,14 +107,15 @@ class OnPolicyRunner:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, critic_obs)
-                    obs, privileged_obs, rewards, dones, infos, *_ = self.env.step(
-                        actions)
-                    print(f"rewards: {rewards}")
-                    print(f"rewards: {rewards.shape}")
+
+                    drl_actions = self.alg.act(obs, critic_obs)
+                    prev_obs = self.env.get_observations()
+                    obs, privileged_obs, actions, rewards, dones, infos = self.env.step(drl_actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(
-                        self.device), rewards.to(self.device), dones.to(self.device)
+                    prev_obs, obs, critic_obs, actions, rewards, dones = prev_obs.to(self.device), obs.to(
+                        self.device), critic_obs.to(self.device), actions.to(self.device), rewards.to(
+                        self.device), dones.to(self.device)
+
                     self.alg.process_env_step(rewards, dones, infos)
 
                     if self.log_dir is not None:
@@ -124,8 +125,7 @@ class OnPolicyRunner:
                         cur_reward_sum += rewards
                         cur_episode_length += 1
                         new_ids = (dones > 0).nonzero(as_tuple=False)
-                        rewbuffer.extend(cur_reward_sum[new_ids][:,
-                                         0].cpu().numpy().tolist())
+                        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
                         lenbuffer.extend(
                             cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
                         cur_reward_sum[new_ids] = 0
@@ -159,6 +159,7 @@ class OnPolicyRunner:
         iteration_time = locs['collection_time'] + locs['learn_time']
 
         ep_string = f''
+
         if locs['ep_infos']:
             for key in locs['ep_infos'][0]:
                 infotensor = torch.tensor([], device=self.device)

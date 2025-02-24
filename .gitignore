@@ -6,6 +6,7 @@ __pycache__/
 logs/
 temp/
 isaacgym/
+unitree_rl_gym/
 *.conf
 corl_figs/
 corl_ckpts/

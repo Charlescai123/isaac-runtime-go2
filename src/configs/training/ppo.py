@@ -1,7 +1,7 @@
 """Configuration for PPO Policy"""
 from ml_collections import ConfigDict
 
-from src.envs import go2_trot_env
+from src.envs import go2_wild_env
 import torch
 import numpy as np
 
@@ -36,9 +36,9 @@ def get_training_config():
     runner_config = ConfigDict()
     runner_config.policy_class_name = "ActorCritic"
     runner_config.algorithm_class_name = "PPO"
-    runner_config.num_steps_per_env = 24
+    runner_config.num_steps_per_env = 100
     runner_config.save_interval = 50
-    runner_config.experiment_name = "ppo_trot"
-    runner_config.max_iterations = 500
+    runner_config.experiment_name = "train_ppo"
+    runner_config.max_iterations = 5000
     config.runner = runner_config
     return config

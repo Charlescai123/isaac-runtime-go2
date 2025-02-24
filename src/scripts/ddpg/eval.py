@@ -1,4 +1,5 @@
 """Evaluate a trained policy."""
+import logging
 import warnings
 
 """
@@ -9,6 +10,7 @@ from absl import app
 from absl import flags
 # from absl import logging
 from isaacgym import gymapi, gymutil
+from src.configs.training import ddpg
 from datetime import datetime
 import os
 import pickle
@@ -55,6 +57,7 @@ def get_latest_policy_path(logdir):
 
 def main(argv):
     del argv  # unused
+    logging.disable(logging.CRITICAL)  # logging output
 
     # Load config and policy
     if FLAGS.logdir.endswith("pt"):
@@ -72,11 +75,36 @@ def main(argv):
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.load(f, Loader=yaml.Loader)
 
+    # Use DDPG
+    config.training = ddpg.get_training_config()
+
+    # Reconfigure for plotting
+    with config.unlocked():
+        config.terminate_on_destination_reach = False
+
+        config.environment.gamma = 0.3
+        config.environment.desired_vx = 0.4
+        config.environment.clip_wz = [-0.7, 0.7]
+        # to_torch([-30, -30, -10, -20, -20, -20], device=self._device),
+        # to_torch([30, 30, 30, 20, 20, 20], device=self._device))
+        config.environment.action_lb = np.array([-5., -10., -5., -5., -5., -4.])
+        config.environment.action_ub = np.array([10., 10., 5., 5., 5., 4.])
+
+        config.environment.base_position_kp = np.array([0., 0., 50.])
+        config.environment.base_position_kd = np.array([10., 10., 10.])
+        config.environment.base_orientation_kp = np.array([50., 50., 0.])
+        config.environment.base_orientation_kd = np.array([10., 10., 10.])
+
+        config.environment.terminate_on_dense_body_contact = False
+        config.environment.terminate_on_height = 0.15
+
     # HA-Teacher module
     if FLAGS.enable_ha_teacher:
-        config.environment.ha_teacher.enable = True
-        config.environment.ha_teacher.chi = 0.15
-        config.environment.ha_teacher.tau = 50
+        with config.unlocked():
+            config.environment.safety_subset = [0.1, 0.28, 0.28, np.inf, 0.33, np.inf, np.inf, np.inf, np.inf, 1.]
+            config.environment.ha_teacher.enable = True
+            config.environment.ha_teacher.chi = 0.15
+            config.environment.ha_teacher.tau = 10
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -121,9 +149,12 @@ def main(argv):
     print(f"env._torque_optimizer._base_position_kd: {env._torque_optimizer._base_position_kd}")
     print(f"env._torque_optimizer._base_orientation_kp: {env._torque_optimizer._base_orientation_kp}")
     print(f"env._torque_optimizer._base_orientation_kd: {env._torque_optimizer._base_orientation_kd}")
-    # time.sleep(1)
+    # time.sleep(123)
     start_time = time.time()
     logs = []
+    wait_step = 0
+    wait_buffer = 400
+    done_flag = False
     with torch.inference_mode():
         while True:
             s = time.time()
@@ -132,6 +163,7 @@ def main(argv):
             print(f"state is: {state}")
 
             action = policy(state)
+
             # action = torch.zeros([1, 6], device=device)
 
             def add_beta_noise(action):
@@ -144,7 +176,7 @@ def main(argv):
 
             # Add beta noise
             print(f"pre action is: {action}")
-            action = add_beta_noise(action=action)
+            # action = add_beta_noise(action=action)
             print(f"action after adding noise is: {action}")
 
             # print(f"action is: {type(action)}")
@@ -157,10 +189,31 @@ def main(argv):
             total_reward += reward
             logs.extend(info["logs"])
 
-            if steps_count == 20000 or done.any():
-                print(info["episode"])
-                break
+            # import pdb
+            # pdb.set_trace()
 
+            if info["fails"] >= 1:
+                # import pdb
+                # pdb.set_trace()
+                done_flag = True
+
+            if steps_count == 4500 or done.any():
+            # if steps_count == 1000 or done.any():
+                print(info["episode"])
+                done_flag = True
+                # break
+
+            if done_flag:
+                if wait_step < wait_buffer:
+                    wait_step += 1
+                else:
+                    break
+
+            if env.planner.planning_flag is False:
+                if wait_step < wait_buffer:
+                    wait_step += 1
+                else:
+                    break
             print(f"steps_count: {steps_count}")
             e = time.time()
             print(f"step duration: {e - s}")

@@ -12,7 +12,7 @@ import go2_interface
 from src.envs.robots import go2
 from src.envs.robots.modules.estimator import state_estimator
 from src.envs.robots.motors import MotorCommand, MotorControlMode
-from src.envs.terrains.wild_env import WildTerrainEnv
+from src.envs.terrains.wild_terrain_env import WildTerrainEnv
 
 
 class Go2Robot(go2.Go2):

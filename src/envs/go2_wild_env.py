@@ -1,9 +1,7 @@
 """Policy outputs desired CoM speed for Go2 to track the desired speed."""
 
-import itertools
-import math
 import time
-from collections import deque
+import logging
 from typing import Sequence
 
 from isaacgym import gymapi, gymutil
@@ -13,17 +11,15 @@ import numpy as np
 import torch
 
 from src.configs.defaults import sim_config
+from src.envs.go2_rewards import Go2Rewards
 from src.envs.robots.modules.controller import raibert_swing_leg_controller, qp_torque_optimizer
 from src.envs.robots.modules.gait_generator import phase_gait_generator
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.modules.planner.path_planner import PathPlanner
-from src.envs.robots.modules.planner.utils import get_shortest_path, path_plot
 from src.envs.robots.motors import MotorControlMode, concatenate_motor_actions
-from src.envs.terrains.wild_env import WildTerrainEnv
-from src.envs.terrains.wild_env_test1 import WildTerrainEnvTest1
+from src.envs.terrains.wild_terrain_env import WildTerrainEnv
 from src.ha_teacher.ha_teacher import HATeacher
 from src.coordinator.coordinator import Coordinator
-from src.physical_design import MATRIX_P
 from omegaconf import DictConfig
 import matplotlib.pyplot as plt
 
@@ -79,7 +75,7 @@ def create_sim(sim_conf):
     return gym, sim, viewer
 
 
-class Go2TrotEnv:
+class Go2WildExploreEnv:
 
     def __init__(self,
                  num_envs: int,
@@ -92,6 +88,9 @@ class Go2TrotEnv:
         self._device = device
         self._show_gui = show_gui
         self._config = config
+        self._gamma = config.gamma
+        self._terrain_region = to_torch(config.terrain_region, device=device)
+        self._init_map_flag = True
 
         self._use_real_robot = use_real_robot
 
@@ -100,33 +99,15 @@ class Go2TrotEnv:
                 self._config.observation_noise = to_torch(
                     self._config.observation_noise, device=self._device)
 
-        # Coordinator
-        self.coordinator = Coordinator(num_envs=self._num_envs, device=self._device)
-
-        # HA-Teacher
-        self.ha_teacher = HATeacher(num_envs=self._num_envs, teacher_cfg=config.ha_teacher, device=self._device)
-
-        # Set up robot and controller
-        use_gpu = ("cuda" in device)
+        # Simulation config
         self._sim_conf = sim_config.get_config(
-            use_gpu=use_gpu,
             show_gui=show_gui,
+            use_gpu=("cuda" in device),
             use_penetrating_contact=self._config.get('use_penetrating_contact', False)
         )
 
-        # Assign the desired state
-        self.desired_vx = 0.7
-        self.desired_com_height = 0.3
-        self.desired_wz = 0.
-
         self._gym, self._sim, self._viewer = create_sim(self._sim_conf)
         self._create_terrain()
-
-        # add_ground(self._gym, self._sim)
-        # add_terrain(self._gym, self._sim, "stair")
-        # add_terrain(self._gym, self._sim, "slope")
-        # add_terrain(self._gym, self._sim, "stair", 3.95, True)
-        # add_terrain(self._gym, self._sim, "stair", 0., True)
 
         self._init_positions = self._compute_init_positions()
         if self._use_real_robot:
@@ -140,8 +121,7 @@ class Go2TrotEnv:
             init_positions=self._init_positions,
             sim=self._sim,
             viewer=self._viewer,
-            # world_env=WildTerrainEnv,
-            world_env=WildTerrainEnvTest1,
+            world_env=WildTerrainEnv,
             sim_config=self._sim_conf,
             motor_control_mode=MotorControlMode.HYBRID,
             motor_torque_delay_steps=self._config.get('motor_torque_delay_steps', 0)
@@ -163,12 +143,20 @@ class Go2TrotEnv:
         self._robot.set_foot_frictions(0.01)
         self._robot.set_foot_frictions(self._config.get('foot_friction', 1.))
 
-        # Get observation
-        root_state_tensor = self._gym.acquire_actor_root_state_tensor(self._sim)
-        self._gym.refresh_actor_root_state_tensor(self._sim)
+        # Coordinator
+        self.coordinator = Coordinator(num_envs=self._num_envs, device=self._device)
+
+        # HA-Teacher
+        self.ha_teacher = HATeacher(num_envs=self._num_envs, teacher_cfg=config.ha_teacher, device=self._device)
 
         # Gait scheduler
         self._gait_generator = phase_gait_generator.PhaseGaitGenerator(self._robot, self._config.gait)
+
+        # Reference state
+        self.desired_vx = config.desired_vx
+        self.desired_com_height = config.desired_pz
+        self.desired_wz = config.desired_wz
+        self.clip_wz = config.clip_wz
 
         # Swing leg controller
         self._swing_leg_controller = raibert_swing_leg_controller.RaibertSwingLegController(
@@ -216,19 +204,27 @@ class Go2TrotEnv:
                                     viewer=self._viewer,
                                     num_envs=self._num_envs,
                                     device=self._device)
+        self.sub_goal_reach_flag = False
 
-        # Episode statistics
+        # Episodic statistics
+        self._go2_reward = Go2Rewards(self, reward_cfg=config.reward)
         self._step_count = torch.zeros(self._num_envs, device=self._device)
-        self._init_yaw = torch.zeros(self._num_envs, device=self._device)
         self._episode_length = self._config.episode_length_s / self._config.env_dt
         self._construct_observation_and_action_space()
 
-        self._obs_buf = torch.zeros((self._num_envs, 12), device=self._device)
         self._privileged_obs_buf = None
-        self._desired_landing_position = torch.zeros((self._num_envs, 3), device=self._device, dtype=torch.float)
+        self._obs_buf = torch.zeros((self._num_envs, config.obs_dim), device=self._device)
+        self._last_obs_buf = torch.zeros((self._num_envs, config.obs_dim), device=self._device)
+        self._last_action = torch.zeros((self._num_envs, config.act_dim), device=self._device)
+        self._last_terminal_action = torch.zeros((self._num_envs, config.act_dim), device=self._device)
+        self._goal_position = torch.zeros((self._num_envs, 3), device=self._device, dtype=torch.float)
         self._cycle_count = torch.zeros(self._num_envs, device=self._device)
+        self._teacher_activation_times = torch.zeros(self._num_envs, device=self._device)
+        self._student_activation_times = torch.zeros(self._num_envs, device=self._device)
+        # self._motor_energy_consumption = []
 
         self._extras = dict()
+        self._extras["fails"] = 0
 
         # Running a few steps with dummy commands to ensure JIT compilation
         if self._num_envs == 1 and self._use_real_robot:
@@ -283,42 +279,43 @@ class Go2TrotEnv:
         self._extras["time_outs"] = self._episode_terminated()
         if env_ids.shape[0] > 0:
             self._extras["episode"] = {}
-            self._extras["episode"]["cycle_count"] = torch.mean(
-                self._gait_generator.true_phase[env_ids]) / (2 * torch.pi)
+            # self._extras["episode"]["cycle_count"] = torch.mean(
+            #     self._gait_generator.true_phase[env_ids]) / (2 * torch.pi)
+
+            # Reset all rewards statistics
+            for reward_name in self._go2_reward.episode_sums.keys():
+                self._go2_reward.episode_sums[reward_name][env_ids] = 0
 
             self._step_count[env_ids] = 0
             self._cycle_count[env_ids] = 0
-            self._init_yaw[env_ids] = 0
 
             self._robot.reset_idx(env_ids)
             self._swing_leg_controller.reset_idx(env_ids)
             self._gait_generator.reset_idx(env_ids)
             self._planner.reset()
+            self._goal_position[env_ids, :2] = to_torch(self._planner.goal, dtype=torch.float32, device=self._device)
 
             self._obs_buf = self._get_observations()
             self._privileged_obs_buf = self._get_privileged_observations()
+            self._last_obs_buf = torch.zeros((self._num_envs, self._config.obs_dim), device=self._device)
+            self._last_action = torch.zeros((self._num_envs, self._config.act_dim), device=self._device)
+            self._last_terminal_action = torch.zeros((self._num_envs, self._config.act_dim), device=self._device)
 
         return self._obs_buf, self._privileged_obs_buf
 
     def step(self, drl_action: torch.Tensor):
-        print(f"step_cnt: {self._step_count}")
-        # print(f"action is: {action}")
-        self._last_obs_buf = torch.clone(self._obs_buf)
 
-        self._last_action = torch.clone(drl_action)
         drl_action = torch.clip(drl_action, self._action_lb, self._action_ub)
-        # action = torch.zeros_like(action)
         nominal_actions = torch.zeros(self._num_envs, 6, device=self._device)
         sum_reward = torch.zeros(self._num_envs, device=self._device)
         dones = torch.zeros(self._num_envs, device=self._device, dtype=torch.bool)
 
         logs = []
-
         start = time.time()
 
         for step in range(max(int(self._config.env_dt / self._robot.control_timestep), 1)):
-            print(f"config.env_dt: {self._config.env_dt}")
-            print(f"self._robot.control_timestep: {self._robot.control_timestep}")
+            logging.info(f"config.env_dt: {self._config.env_dt}")
+            logging.info(f"self._robot.control_timestep: {self._robot.control_timestep}")
             self._gait_generator.update()
             self._swing_leg_controller.update()
 
@@ -328,23 +325,31 @@ class Go2TrotEnv:
             # Let the planner makes planning
             if self._planner.planning_flag:
 
-                if self._step_count == 0:
+                # Do map initialize once
+                if self._init_map_flag:
                     self._planner.init_map()
+                    self._init_map_flag = False
+
                 # Take the trajectory generated from the planner
-                ut = self._planner.get_reference_trajectory()
+                ut, self.sub_goal_reach_flag = self._planner.get_reference_trajectory()
                 vel_x = ut[0] * 1
                 ref_wz = ut[1] * 1
 
-                # Set desired command
-                self.desired_vx = 0.5
+                # Set desired command for vx and wz
                 # self.desired_vx = vel_x
-                self.desired_wz = ref_wz
-                clip_wz = 0.6
-                self.desired_wz = np.clip(ref_wz, -clip_wz, clip_wz)
+                self.desired_wz = np.clip(ref_wz, a_min=self.clip_wz[0], a_max=self.clip_wz[1])
+
+                # Update goal position to calc distance
+                if len(self._planner.nav_goal_in_world) > 0:
+                    self._goal_position[0, :2] = to_torch(self._planner.goal, dtype=torch.float32, device=self._device)
+
             else:
                 self.desired_vx = 0.
                 self.desired_wz = 0.
 
+            # T = 0.02
+            # yaw = self._robot.base_orientation_rpy[0, 2]
+            # self.desired_yaw = yaw + T * self.desired_wz
             # Setup controller reference
             self._torque_optimizer.set_controller_reference(
                 desired_height=self.desired_com_height,
@@ -359,17 +364,17 @@ class Go2TrotEnv:
                 self._robot.update_desired_foot_contact(
                     self._gait_generator.desired_contact_state)  # pytype: disable=attribute-error
 
-            # Get swing leg action
-            desired_foot_positions = self._swing_leg_controller.desired_foot_positions
-
-            self._desired_acc, self._solved_acc, self._qp_cost, self._num_clips = self._torque_optimizer.get_model_action(
+            # Compute model-based acceleration
+            self._desired_acc, self._solved_acc, self._qp_cost, self._num_clips = self._torque_optimizer.compute_model_acc(
                 foot_contact_state=self._gait_generator.desired_contact_state,
-                desired_foot_position=desired_foot_positions
+                desired_foot_position=self._swing_leg_controller.desired_foot_positions
             )
 
             # HP-Student action (residual form)
-            # hp_action = self._desired_acc
-            hp_action = drl_action + self._desired_acc
+            # weights = to_torch([1.1, 1., 1., 0.5, 0.5, 0.5], device=self._device)
+            drl_action_res = drl_action * self._gamma
+            phy_action_res = self._solved_acc * (1 - self._gamma)
+            hp_action = drl_action_res + phy_action_res
 
             # HA-Teacher update
             self._robot.energy_2d = self.ha_teacher.update(self._torque_optimizer.tracking_error)
@@ -377,21 +382,18 @@ class Go2TrotEnv:
             # HA-Teacher action
             ha_action, dwell_flag = self.ha_teacher.get_action()
 
-            # Use Normal Kp Kd
-            # ha_action = self._desired_acc.squeeze()
-
-            # print(f"hp_action: {hp_action}")
-            # print(f"ha_action: {ha_action}")
-            # print(f"self._torque_optimizer.tracking_error: {self._torque_optimizer.tracking_error}")
-            terminal_stance_ddq, action_mode = self.coordinator.get_terminal_action(hp_action=hp_action,
-                                                                                    ha_action=ha_action,
-                                                                                    plant_state=self._torque_optimizer.tracking_error,
-                                                                                    dwell_flag=dwell_flag,
-                                                                                    epsilon=self.ha_teacher.epsilon)
-
-            terminal_stance_ddq = to_torch(terminal_stance_ddq, device=self._device)
-            # print(f"terminal_stance_ddq: {terminal_stance_ddq}")
-            # print(f"action_mode: {action_mode}")
+            self._terminal_stance_ddq, action_mode = self.coordinator.get_terminal_action(
+                hp_action=hp_action,
+                ha_action=ha_action,
+                plant_state=self._torque_optimizer.tracking_error,
+                safety_subset=self.ha_teacher.safety_subset,
+                dwell_flag=dwell_flag
+            )
+            logging.info(f"hp_action: {hp_action}")
+            logging.info(f"ha_action: {ha_action}")
+            logging.info(f"self._torque_optimizer.tracking_error: {self._torque_optimizer.tracking_error}")
+            logging.info(f"terminal_stance_ddq: {self._terminal_stance_ddq}")
+            logging.info(f"action_mode: {action_mode}")
 
             # Action mode indices
             hp_indices = torch.argwhere(action_mode == ActionMode.STUDENT.value).squeeze(-1)
@@ -399,31 +401,34 @@ class Go2TrotEnv:
             hp_motor_action = None
             ha_motor_action = None
 
-            # print(f"hp_indices: {hp_indices}")
-            # print(f"ha_indices: {ha_indices}")
+            logging.info(f"hp_indices: {hp_indices}")
+            logging.info(f"ha_indices: {ha_indices}")
 
             # HP-Student in Control
             if len(hp_indices) > 0:
                 hp_motor_action, self._desired_acc[hp_indices], self._solved_acc[hp_indices], \
                     self._qp_cost[hp_indices], self._num_clips[hp_indices] = self._torque_optimizer.get_action(
-                    self._gait_generator.desired_contact_state[hp_indices],
-                    swing_foot_position=desired_foot_positions[hp_indices],
-                    generated_acc=terminal_stance_ddq[hp_indices]
+                    foot_contact_state=self._gait_generator.desired_contact_state[hp_indices],
+                    swing_foot_position=self._swing_leg_controller.desired_foot_positions[hp_indices],
+                    generated_acc=self._terminal_stance_ddq[hp_indices]
                 )
-                self.robot.set_robot_base_color(color=(0, 0, 1), env_ids=hp_indices)  # Display Blue
+                self._student_activation_times[hp_indices] += 1
+                self.robot.set_robot_base_color(color=(0, 0, 1.), env_ids=hp_indices)  # Display Blue
                 nominal_actions[hp_indices] = drl_action  # Nominal actions for HP-student
 
             # HA-Teacher in Control
             if len(ha_indices) > 0:
                 ha_motor_action, self._desired_acc[ha_indices], self._solved_acc[ha_indices], \
-                    self._qp_cost[ha_indices], self._num_clips[ha_indices] = self._torque_optimizer.get_safe_action(
-                    self._gait_generator.desired_contact_state[ha_indices],
-                    swing_foot_position=desired_foot_positions[ha_indices],
-                    safe_acc=terminal_stance_ddq[ha_indices]
+                    self._qp_cost[ha_indices], self._num_clips[ha_indices] = self._torque_optimizer.get_action(
+                    foot_contact_state=self._gait_generator.desired_contact_state[ha_indices],
+                    swing_foot_position=self._swing_leg_controller.desired_foot_positions[ha_indices],
+                    generated_acc=self._terminal_stance_ddq[ha_indices],
+                    gravity_frame=True
                 )
-                self.robot.set_robot_base_color(color=(1, 0, 0), env_ids=ha_indices)  # Display Red
+                self._teacher_activation_times[ha_indices] += 1
+                self.robot.set_robot_base_color(color=(1., 0, 0), env_ids=ha_indices)  # Display Red
                 # Nominal actions for HP-student
-                nominal_actions[ha_indices] = ha_action[ha_indices] - self._desired_acc[ha_indices]
+                nominal_actions[ha_indices] = (ha_action[ha_indices] - phy_action_res[ha_indices]) / self._gamma
 
             # Unknown Action Mode
             if len(hp_indices) == 0 and len(ha_indices) == 0:
@@ -432,11 +437,7 @@ class Go2TrotEnv:
             # Add both HP-Student and HA-Teacher Motor Action
             motor_action = concatenate_motor_actions(command1=hp_motor_action, indices1=hp_indices,
                                                      command2=ha_motor_action, indices2=ha_indices)
-
-            # print(f"desired_acc: {self._desired_acc}")
-            # print(f"solved_acc: {self._solved_acc}")
-            # print(f"motor_action: {motor_action}")
-            # print(f"self._robot.base_angular_velocity_world_frame: {self._robot.base_angular_velocity_world_frame}")
+            # Logging
             logs.append(
                 dict(timestamp=self._robot.time_since_reset,
                      base_position=torch.clone(self._robot.base_position),
@@ -449,10 +450,11 @@ class Go2TrotEnv:
                      motor_velocities=torch.clone(self._robot.motor_velocities),
                      motor_action=motor_action,
                      motor_torques=self._robot.motor_torques,
+                     motor_power=self.motor_power,
                      num_clips=self._num_clips,
                      foot_contact_state=self._gait_generator.desired_contact_state,
                      foot_contact_force=self._robot.foot_contact_forces,
-                     desired_swing_foot_position=desired_foot_positions,
+                     desired_swing_foot_position=self._swing_leg_controller.desired_foot_positions,
                      desired_acc_body_frame=self._desired_acc,
                      desired_vx=self.desired_vx,
                      desired_wz=self.desired_wz,
@@ -462,7 +464,7 @@ class Go2TrotEnv:
                      action_mode=action_mode,
                      acc_min=self._action_lb,
                      acc_max=self._action_ub,
-                     energy=to_torch(self._robot.energy_2d, device=self._device),
+                     lyapunov_energy=to_torch(self._robot.energy_2d, device=self._device),
                      solved_acc_body_frame=self._solved_acc,
                      foot_positions_in_base_frame=self._robot.foot_positions_in_base_frame,
                      env_action=drl_action,
@@ -477,22 +479,32 @@ class Go2TrotEnv:
             # Error in last step
             err_prev = self._torque_optimizer.tracking_error
 
-            ####################### Step The Motor Action #######################
+            #################################   Step The Motor Action   #################################
             self._robot.step(motor_action)
-            #####################################################################
+            #############################################################################################
+
+            # Motor energy consumption
+            # self._motor_energy_consumption.append(self.get_motor_energy_consumption())
 
             self._obs_buf = self._get_observations()
             self._privileged_obs_buf = self.get_privileged_observations()
-            # rewards = self.get_reward()
+
+            # Delta action for smoothness
+            delta_action = torch.sqrt(torch.sum(
+                torch.square(self._last_terminal_action - self._terminal_stance_ddq), dim=1))
 
             # Error in next step
             err_next = self._torque_optimizer.tracking_error
 
-            # Get Lyapunov-like reward
-            rewards = self.get_lyapunov_reward(err=err_prev, err_next=err_next)
-
             # Dones or not
-            dones = torch.logical_or(dones, self._is_done())
+            is_done, is_fail = self._is_done()
+            dones = torch.logical_or(dones, is_done)
+
+            # Get Total reward
+            rewards = self._go2_reward.compute_reward(err_prev, err_next, is_fail, delta_action)
+
+            # Episodic statistics
+            self.update_episodic_statistics(env_ids=torch.arange(self._num_envs, device=self._device))
 
             # Sum reward
             sum_reward += rewards * torch.logical_not(dones)
@@ -508,84 +520,45 @@ class Go2TrotEnv:
             self._push_flag = self._pusher.monitor_push(step_cnt=self._step_count,
                                                         env_ids=torch.arange(self._num_envs, device=self._device))
 
-            # print(f"Time: {self._robot.time_since_reset}")
-            # print(f"Gait: {gait_action}")
-            # print(f"Foot: {foot_action}")
-            # print(f"Phase: {self._obs_buf[:, 3]}")
-            # print(
-            #     f"Desired Velocity: {self._torque_optimizer.desired_linear_velocity}")
-            # print(f"Current Velocity: {self._robot.base_velocity_world_frame}")
-            # print(
-            #     f"Desired RPY: {self._torque_optimizer.desired_base_orientation_rpy}")
-            # print(f"Current RPY: {self._robot.base_orientation_rpy}")
-            # print(
-            #     f"Desired Angular Vel: {self._torque_optimizer.desired_angular_velocity}"
-            # )
-            # print(
-            #     f"Current Angular vel: {self._robot.base_angular_velocity_body_frame}")
-            # print(f"Desired Acc: {self._desired_acc}")
-            # print(f"Solved Acc: {self._solved_acc}")
-            # ans = input("Any Key...")
-            # if ans in ["Y", "y"]:
-            #   import pdb
-            #   pdb.set_trace()
             self._extras["logs"] = logs
 
             # Resample commands
-            new_cycle_count = (self._gait_generator.true_phase / (2 * torch.pi)).long()
-            finished_cycle = new_cycle_count > self._cycle_count
-            env_ids_to_resample = finished_cycle.nonzero(as_tuple=False).flatten()
-            self._cycle_count = new_cycle_count
+            # new_cycle_count = (self._gait_generator.true_phase / (2 * torch.pi)).long()
+            # finished_cycle = new_cycle_count > self._cycle_count
+            # self._cycle_count = new_cycle_count
 
-            is_terminal = torch.logical_or(finished_cycle, dones)
+            # is_terminal = torch.logical_or(finished_cycle, dones)
             # if is_terminal.any():
             #     print(f"terminal_reward is: {self.get_terminal_reward(is_terminal, dones)}")
 
-            # import pdb
-            # pdb.set_trace()
             if not self._use_real_robot:
                 self.reset_idx(dones.nonzero(as_tuple=False).flatten())
                 pass
 
-            # if dones.any():
-            #   import pdb
-            #   pdb.set_trace()
-            # print(f"sum_reward: {sum_reward}")
-            # print(f"sum_reward: {sum_reward.shape}")
             if self._show_gui:
                 self._robot.render()
 
         self._step_count += 1
+        self._last_obs_buf = torch.clone(self._obs_buf)
+        self._last_action = torch.clone(drl_action)
+        self._last_terminal_action = torch.clone(self._terminal_stance_ddq)
 
         end = time.time()
-        print(f"***************** step duration: {end - start} *****************")
+        logging.info(f"***************** step duration: {end - start} *****************")
         return self._obs_buf, self._privileged_obs_buf, nominal_actions, sum_reward, dones, self._extras
 
     def _get_observations(self):
+        distance_obs = self.goal_distance.unsqueeze(dim=-1)
+        yaw_diff_obs = self.goal_yaw_difference.unsqueeze(dim=-1)
+        robot_obs = self._torque_optimizer.tracking_error[:, 2:]
+        # desired_wz_obs = to_torch([self.desired_wz], device=self._device).unsqueeze(dim=-1)
 
-        s_desired_next = torch.cat((
-            self._torque_optimizer.desired_base_position,
-            self._torque_optimizer.desired_base_orientation_rpy,
-            self._torque_optimizer.desired_linear_velocity,
-            self._torque_optimizer.desired_angular_velocity),
-            dim=-1)
-
-        s_old_next = torch.cat((
-            self._robot.base_position,
-            self._robot.base_orientation_rpy,
-            self._robot.base_velocity_body_frame,
-            self._robot.base_angular_velocity_body_frame,
-        ), dim=-1)
-
-        robot_obs = self._torque_optimizer.tracking_error
-
-        obs = robot_obs
+        obs = torch.concatenate((distance_obs, yaw_diff_obs, robot_obs), dim=1)
         # if self._config.get("observation_noise", None) is not None and (not self._use_real_robot):
         #     obs += torch.randn_like(obs) * self._config.observation_noise
         return obs
 
     def get_observations(self):
-        # return self._obs_buf
         return self._get_observations()
 
     def _get_privileged_observations(self):
@@ -594,68 +567,82 @@ class Go2TrotEnv:
     def get_privileged_observations(self):
         return self._privileged_obs_buf
 
-    def get_lyapunov_reward(self, err, err_next):
-        """Get lyapunov-like reward
-            error: position_error     (p)
-                   orientation_error  (rpy)
-                   linear_vel_error   (v)
-                   angular_vel_error  (w)
-        """
-
-        _MATRIX_P = torch.tensor(MATRIX_P, dtype=torch.float32, device=self._device)
-        s_curr = err[:, 2:]
-        s_next = err_next[:, 2:]
-        # print(f"s: {s.shape}")
-        # print(f"s_new: {s_new.shape}")
-        # ly_reward_curr = s_new.T @ MATRIX_P @ s_new
-        ST1 = torch.matmul(s_curr, _MATRIX_P)
-        ly_reward_curr = torch.sum(ST1 * s_curr, dim=1, keepdim=True)
-
-        # ly_reward_next = s_next_new.T @ MATRIX_P @ s_next_new
-        ST2 = torch.matmul(s_next, _MATRIX_P)
-        ly_reward_next = torch.sum(ST2 * s_next, dim=1, keepdim=True)
-
-        sum_reward = ly_reward_curr - ly_reward_next  # multiply scaler to decrease
-        # print(f"sum_reward: {sum_reward.shape}")
-        # print(f"sum_reward: {sum_reward}")
-        # sum_reward = torch.tensor(reward, device=self._device)
-
-        return sum_reward.squeeze(dim=-1)
-
-    # def _episode_terminated(self):
-    #     timeout = (self._step_count >= self._episode_length)
-    #     cycles_finished = (self._gait_generator.true_phase /
-    #                        (2 * torch.pi)) > self._config.get('max_jumps', 1)
-    #     return torch.logical_or(timeout, cycles_finished)
-
     def _episode_terminated(self):
         timeout = (self._step_count >= self._episode_length)
         return timeout
 
-    def _is_done(self):
-        gravity_threshold = 0.1
-        is_unsafe = torch.logical_or(
-            # self._robot.projected_gravity[:, 2] < gravity_threshold,
-            to_torch(False, dtype=torch.bool, device=self._device),
-            self._robot.base_position[:, 2] < self._config.get('terminate_on_height', 0.15))
+    def update_episodic_statistics(self, env_ids):
+        # Episode count
+        self._extras["episode"]["ep_step"] = self._step_count
 
-        # Navigation is done
-        if self._planner.planning_flag is False:
-            is_unsafe = torch.logical_or(is_unsafe, to_torch(True, dtype=torch.bool, device=self._device))
+        for reward_name in self._go2_reward.episode_sums.keys():
+            # Stepwise reward
+            reward_val = torch.mean(self._go2_reward.episode_sums[reward_name][env_ids]
+                                    / self._step_count[env_ids])
+            self._extras["episode"]["reward_{}".format(reward_name)] = torch.nan_to_num(reward_val, nan=0.0)
 
+    def _is_terminate(self):
+        """Check the robot termination"""
+        is_terminate = torch.full((self._num_envs,), False, dtype=torch.bool, device=self._device)
+
+        # Planning termination
+        if self._config.get('terminate_on_destination_reach', False):
+            is_terminate = torch.logical_or(is_terminate, to_torch(not self._planner.planning_flag, dtype=torch.bool,
+                                                                   device=self._device))
+        # Body contact termination
         if self._config.get('terminate_on_body_contact', False):
-            is_unsafe = torch.logical_or(is_unsafe, self._robot.has_body_contact)
+            is_terminate = torch.logical_or(is_terminate, self._robot.has_body_contact)
+
+        if self._config.get('terminate_on_dense_body_contact', False):
+            is_terminate = torch.logical_or(is_terminate, self._robot.has_dense_body_contact)
 
         if self._config.get('terminate_on_limb_contact', False):
             limb_contact = torch.logical_or(self._robot.calf_contacts, self._robot.thigh_contacts)
             limb_contact = torch.sum(limb_contact, dim=1)
-            is_unsafe = torch.logical_or(is_unsafe, limb_contact > 0)
+            is_terminate = torch.logical_or(is_terminate, limb_contact > 0)
 
-        # input("Any Key...")
-        # if is_unsafe.any():
-        #   import pdb
-        #   pdb.set_trace()
-        return torch.logical_or(self._episode_terminated(), is_unsafe)
+        # Yaw deviation termination
+        if self._config.get('terminate_on_yaw_deviation', False):
+            yaw_diff = torch.abs(self.goal_yaw_difference)
+            terminate_by_yaw = yaw_diff > self._config.yaw_deviation_threshold
+            is_terminate = torch.logical_or(is_terminate, terminate_by_yaw)
+
+        # Maximum steps
+        if self._config.get('terminate_on_timeout', False):
+            timeout = self._episode_terminated()
+            is_terminate = torch.logical_or(is_terminate, timeout)
+
+        # Out of terrain region
+        if self._config.get('terminate_on_out_of_terrain', False):
+            x_range, y_range = self._terrain_region
+            curr_pos = self._robot.base_position_world[:, :2]
+            in_x_range = (curr_pos[:, 0] >= x_range[0]) & (curr_pos[:, 0] <= x_range[1])
+            in_y_range = (curr_pos[:, 1] >= y_range[0]) & (curr_pos[:, 1] <= y_range[1])
+            in_range = in_x_range & in_y_range
+            is_terminate = torch.logical_or(is_terminate, ~in_range)  # terminate when out of region
+
+        return is_terminate
+
+    def _is_fail(self):
+        """Check the robot failure according to defined safety condition (hard constraint)"""
+        gravity_threshold = 0.1
+        is_fail = torch.logical_or(
+            # self._robot.projected_gravity[:, 2] < gravity_threshold,
+            torch.full((self._num_envs,), False, dtype=torch.bool, device=self._device),
+            self._robot.base_position[:, 2] < self._config.get('terminate_on_height', 0.12))
+        return is_fail
+
+    def _is_done(self):
+        """Check done or not"""
+        # Check the system's failure
+        is_fail = self._is_fail()
+        if torch.any(is_fail):
+            self._extras["fails"] += is_fail.sum()
+
+        # Check the termination
+        is_terminated = self._is_terminate()
+
+        return torch.logical_or(is_terminated, is_fail), is_fail
 
     @property
     def device(self):
@@ -670,8 +657,42 @@ class Go2TrotEnv:
         return self._gait_generator
 
     @property
-    def desired_landing_position(self):
-        return self._desired_landing_position
+    def torque_optimizer(self):
+        return self._torque_optimizer
+
+    @property
+    def goal_position(self):
+        return self._goal_position
+
+    @property
+    def goal_distance(self):
+        base_position = self._robot.base_position_world
+        distance = torch.sqrt(
+            torch.sum(torch.square(base_position[:, :2] - self._goal_position[:, :2]), dim=1))
+        return distance
+
+    @property
+    def goal_yaw_difference(self):
+        base_yaw_world = self._robot.base_orientation_rpy[:, 2]
+        base_position_xy = self._robot.base_position_world[:, :2]
+        goal_position_xy = self._goal_position[:, :2]
+
+        delta_position_xy = goal_position_xy - base_position_xy
+        goal_yaw_world = torch.atan2(delta_position_xy[:, 1], delta_position_xy[:, 0])
+
+        # yaw_diff = goal_yaw_world - base_yaw_world
+
+        # Wrap to [-pi, pi]
+        # yaw_diff = (yaw_diff + torch.pi) % (2 * torch.pi) - torch.pi
+
+        # Wrap to [0, pi]
+        yaw_diff = torch.abs(goal_yaw_world - base_yaw_world)
+
+        return to_torch(yaw_diff, device=self._device)
+
+    @property
+    def planner(self):
+        return self._planner
 
     @property
     def action_space(self):
@@ -708,7 +729,17 @@ class Go2TrotEnv:
     @episode_length_buf.setter
     def episode_length_buf(self, new_length: torch.Tensor):
         self._step_count = to_torch(new_length, device=self._device)
-        self._gait_generator._current_phase += 2 * torch.pi * (new_length / self.max_episode_length * self._config.get(
-            'max_jumps', 1) + 1)[:, None]
-        self._cycle_count = (self._gait_generator.true_phase /
-                             (2 * torch.pi)).long()
+
+    @property
+    def motor_power(self):
+        """Motor Power (Unit: Watt/N·m)
+        (Non-regenerative braking system)
+        Power is composed by two terms:
+        term1: mechanical power
+        term2: extra heat dissipation caused by copper loss
+        """
+        copper_loss_coeff = 1.3
+        mechanical_power = self._robot.motor_torques * self._robot.motor_velocities
+        copper_loss = copper_loss_coeff * self._robot.motor_torques ** 2
+        motor_power = torch.clip(mechanical_power + copper_loss, min=0)
+        return torch.clip(torch.sum(motor_power, dim=1), min=0., max=2000.)

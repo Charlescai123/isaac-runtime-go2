@@ -2,11 +2,10 @@
 from ml_collections import ConfigDict
 from rsl_rl.modules.network import Network
 
-from src.envs import go2_trot_env
+from src.envs import go2_wild_env
 import torch
 import numpy as np
 
-NUM_ENVS = 1
 
 def get_training_config():
     """Config for training"""
@@ -18,8 +17,9 @@ def get_training_config():
 
     # Replay buffer
     alg_config.action_noise_scale = 0.1
+    alg_config.init_noise_std = 0.1
     alg_config.storage_initial_size = 0
-    alg_config.storage_size = 1e5 * NUM_ENVS
+    alg_config.storage_size = 1e5
     alg_config.batch_count = 1
     alg_config.batch_size = 4096
 
@@ -57,10 +57,10 @@ def get_training_config():
     # Runner
     runner_config.policy_class_name = "ActorCritic"
     runner_config.algorithm_class_name = "DDPG"
-    runner_config.num_steps_per_env = 500
+    runner_config.num_steps_per_env = 100
     runner_config.save_interval = 50
-    runner_config.experiment_name = "ddpg_trot"
-    runner_config.max_iterations = 1500
+    runner_config.experiment_name = "train_ddpg"
+    runner_config.max_iterations = 5000
 
     # Integrate
     config.algorithm = alg_config

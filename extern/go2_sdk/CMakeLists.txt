@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(go1_sdk)
+project(go2_sdk)
 
 include_directories(include)
 

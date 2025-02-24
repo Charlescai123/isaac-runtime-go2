@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from collections import deque
@@ -11,7 +12,10 @@ from src.envs.robots.modules.planner.FMM import FMMPlanner
 from src.envs.robots.modules.planner.spline import Spline
 from src.envs.robots.modules.planner.utils import get_shortest_path, path_plot
 
-GOALS = [(49, 1.7), (51.6, 0), (55, -1.8), (58, 1)]
+# GOALS = [(49, 1.3), (51.6, -0.2), (55, -1.8), (58, 1)]      # Training
+# GOALS = [(49, 1.5), (51.7, -0.5), (55, -1.8), (57.5, 1)]  # Eval Origin
+GOALS = [(49, 1.3), (52, -0.65), (55, -1.82), (57.8, 0.4)]  # Eval for plot
+
 
 
 class PathPlanner:
@@ -41,9 +45,9 @@ class PathPlanner:
 
         # Planning stuff
         self.planning_flag = True
+        self.nav_stop_flag = False
         self.nav_goal_in_world = deque(GOALS)
         self._ref_trajectory = deque()
-        self._stop_flag = False
 
     def reset(self):
         # self._occupancy_map = None
@@ -53,9 +57,9 @@ class PathPlanner:
 
         # Planning stuff
         self.planning_flag = True
+        self.nav_stop_flag = False
         self.nav_goal_in_world = deque(GOALS)
         self._ref_trajectory = deque()
-        self._stop_flag = False
 
         self.clear_goals()
         self.reset_goals()
@@ -66,7 +70,8 @@ class PathPlanner:
                                                                        show_map=False,
                                                                        save_map=False)
         self._costmap, self._costmap_for_plot = self.get_costmap(goal_in_map=map_goal,
-                                                                 show_map=False)
+                                                                 show_map=False,
+                                                                 save_map=False)
 
         from scipy.ndimage import gaussian_filter
 
@@ -213,26 +218,27 @@ class PathPlanner:
 
         # Figure Plot
         if show_map:
-            plt.subplot(1, 2, 1)
-            plt.imshow(occupancy_map)
-            plt.scatter(*goal_in_map[::-1], c='red', s=20, label='Goal')
-            # plt.gca().invert_yaxis()  # Inverse y-axis
-            # plt.gca().invert_xaxis()  # Inverse x-axis
-            # plt.gca().xaxis.tick_right()  # move y-axis to the right
-            plt.colorbar(label="Occupancy")
-            plt.title("Occupancy Map")
-            plt.legend()
+            # plt.subplot(1, 2, 1)
+            # plt.imshow(occupancy_map)
+            # plt.scatter(*goal_in_map[::-1], c='red', s=40, label='Goal')
+            # # plt.gca().invert_yaxis()  # Inverse y-axis
+            # # plt.gca().invert_xaxis()  # Inverse x-axis
+            # # plt.gca().xaxis.tick_right()  # move y-axis to the right
+            # plt.colorbar(label="Occupancy")
+            # plt.title("Occupancy Map")
+            # plt.legend()
 
             plt.subplot(1, 2, 2)
             plt.imshow(costmap_for_plot, cmap='viridis')
             # plt.imshow(costmap_for_plot, cmap='viridis')
-            plt.scatter(*goal_in_map[::-1], c='red', s=20, label='Goal')
+            plt.scatter(*goal_in_map[::-1], c='red', s=40, label='Goal')
             plt.gca().invert_yaxis()  # Inverse y-axis
             plt.gca().invert_xaxis()  # Inverse x-axis
             plt.gca().yaxis.tick_right()  # move y-axis to the right
             plt.title("Cost Map")
             plt.colorbar(label="Cost", cmap='jet')
-            plt.legend()
+            plt.legend(fontsize=20)
+            plt.savefig("scatter_plot.png", dpi=300, bbox_inches='tight')
             plt.show()
 
         return costmap, costmap_for_plot
@@ -314,12 +320,18 @@ class PathPlanner:
             #     print(f"pts_in_world: {pts_in_world}")
             # self._draw_path(pts=np.asarray(next_pos_l))
 
-            self._stop_flag = stop_flag
+            self.nav_stop_flag = stop_flag
             self._ref_trajectory.extend(ref_vel)
+        else:
+            self.nav_stop_flag = self.is_curr_goal_reached()
 
-        # Determine to stop or not
-        if self._stop_flag:
+        ret_stop_flag = self.nav_stop_flag
+
+        # Determine to stop navigation or not
+        if self.nav_stop_flag:
             current_goal = self._goal
+
+            # Remaining navigation waypoints
             if len(self.nav_goal_in_world) > 0:
                 self._goal = self.nav_goal_in_world.popleft()
                 self._draw_goals(goal=self._goal, color=(0, 0, 1), size=0.17)
@@ -327,6 +339,7 @@ class PathPlanner:
                 # self._costmap, self._costmap_for_plot = self.get_costmap(goal_in_map=map_goal,
                 #                                                          occupancy_map=self._occupancy_map,
                 #                                                          show_map=True)
+            # Has reached the final destination goal point
             else:
                 self._goal = None
                 self.planning_flag = False
@@ -335,10 +348,10 @@ class PathPlanner:
             print(f"The robot is near the goal, stop!!!")
             self._draw_goals(goal=current_goal, color=(0, 1, 0), size=0.17)
 
-            self._stop_flag = False
+            self.nav_stop_flag = False
 
         ut = self._ref_trajectory.popleft()
-        return ut
+        return ut, ret_stop_flag
 
     def navigate_to_goal(self, goal=None, occupancy_map=None):
         """Given the goal in the world, return reference yaw rate and stop flag"""
@@ -353,7 +366,7 @@ class PathPlanner:
         # ^
         # |
         # | ----> y
-        print(f"map_goal: {map_goal}")
+        logging.info(f"map_goal: {map_goal}")
 
         if occupancy_map is None:
             occupancy_map = self._robot.camera_sensor[0].get_bev_map(as_occupancy=True,
@@ -368,6 +381,16 @@ class PathPlanner:
 
         ref_pos, ref_vel, stop_flag = self.motion_planning(map_goal=map_goal, occupancy_map=occupancy_map)
         return ref_pos, ref_vel, stop_flag
+
+    def is_curr_goal_reached(self, env_idx=0):
+        """Check if current goal has been reached"""
+        # Position, Velocity and Yaw in World frame
+        curr_pos_w = self._robot.base_position[env_idx, :2].cpu().numpy()
+
+        # Position and Velocity in Map coordinates
+        curr_pos_m = self.world_to_map_frame(pose_in_world=curr_pos_w, bev_frame=True)
+
+        return self._planner.is_near_goal(pos_in_map=curr_pos_m)
 
     @property
     def goal(self):

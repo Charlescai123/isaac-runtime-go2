@@ -187,7 +187,7 @@ class RGBDCamera:
     def get_bev_map(self,
                     roi_x_range=(45, 60),
                     roi_y_range=(-6, 6),
-                    roi_z_range=(-1.5, 1.5),
+                    roi_z_range=(-2.5, 2.5),
                     grid_size=0.015,
                     reverse_xy=True,
                     show_map=False,
@@ -293,15 +293,18 @@ class RGBDCamera:
         # Flip the BEV Map
         # bev_map = bev_map[::-1]
         # bev_map = np.fliplr(bev_map)
-        # np.savetxt(f"bevmap.txt", bev_map, fmt="%.1f")
+        # np.save(f"bevmap.npy", bev_map)
 
         # Store BEV Map
         if save_map:
             label_save_folder = '.'
-            bev_save_path = os.path.join(label_save_folder, f"bev.png")
+            filename = "occupancy" if as_occupancy else "bev"
+            bev_save_path = os.path.join(label_save_folder, f"{filename}.png")
             plt.imsave(bev_save_path, bev_map)
-            bev_save_path = os.path.join(label_save_folder, f"bev_flip_ud.png")
+            bev_save_path = os.path.join(label_save_folder, f"{filename}_flip_ud.png")
             plt.imsave(bev_save_path, np.flipud(bev_map))
+            bev_save_path = os.path.join(label_save_folder, f"{filename}_flip_ud_vh.png")
+            plt.imsave(bev_save_path, np.flip(bev_map, axis=(0, 1)))
 
         # Visualize BEV Map
         if show_map:

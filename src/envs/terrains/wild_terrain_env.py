@@ -9,7 +9,7 @@ import numpy as np
 from typing import Any
 
 
-class WildTerrainEnvTest1:
+class WildTerrainEnv:
     def __init__(
             self,
             sim: Any,
@@ -39,7 +39,7 @@ class WildTerrainEnvTest1:
         # Simulate unnecessary terrain dynamics
         # self.simulate_irrelevant_dynamics()
 
-    def simulate_irrelevant_dynamics(self, step_cnt=1000):
+    def simulate_irrelevant_dynamics(self, step_cnt=2000):
         """Simulate and bypass irrelevant terrain dynamics initially to prevent unwanted motion in subsequent robot
         interactions."""
         self._gym.prepare_sim(self._sim)
@@ -53,8 +53,10 @@ class WildTerrainEnvTest1:
         print(f"loading all assets....")
         offset_x = 40
         # offset_x = 0
+
         # Add outdoor scene
         self.load_outdoor_asset(env=self._env, scene_offset_x=offset_x, reverse=False)
+
         # Add uneven terrains
         add_uneven_terrains(gym=self._gym, sim=self._sim, scene_offset_x=offset_x + self._transform.x,
                             scene_offset_y=self._transform.y, reverse=False)
@@ -83,20 +85,19 @@ class WildTerrainEnvTest1:
                                            scale=1.0)
         self._actors.append(actor)
 
-        # Mountain Rocks
+        # Huge Mountain Rocks
         self.load_mountain_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
 
         # Snow Rocks
-        self.load_snow_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
+        # self.load_snow_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
 
         # Random stones (movable stones)
-        self.load_random_snowstones_in_a_region(env=env, scene_offset_x=offset_x, width=10, length=10, stone_nums=600,
-                                                reverse=reverse)
+        self.load_random_snowstones_in_a_region(env=env, scene_offset_x=offset_x, width=6, length=10, stone_nums=480,
+                                                scale_size=(0.15, 0.18), reverse=reverse, random_seed=9)
         # Random stones (static stones)
         self.load_random_cobblestones_in_a_region(env=env, scene_offset_x=offset_x, stone_nums=100, reverse=reverse)
-
-        # Stopsign
-        # self.load_stop_sign(env=env, offset_x=offset_x, offset_y=offset_y)
+        # self.load_random_cobblestones_in_a_region(env=env, scene_offset_x=offset_x + 2, scene_offset_y=-3,
+        #                                           width=6, length=10, stone_nums=500, reverse=reverse)
 
         # Snow Tree
         self.load_snow_tree(env=env, offset_x=offset_x, offset_y=offset_y)
@@ -107,14 +108,17 @@ class WildTerrainEnvTest1:
         # Dead wood
         self.load_dead_wood(env=env, offset_x=offset_x, offset_y=offset_y)
 
+        # Stopsign
+        # self.load_stop_sign(env=env, offset_x=offset_x, offset_y=offset_y)
+
     def load_mountain_rocks(self, env, offset_x, offset_y):
         offset_x -= 7
         offset_y = 0
         # Big Mountain Rocks
         actor1 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock1", fix_base_link=False,
-                                  pos=(25 + offset_x, -1.5 + offset_y, 0.1), rot=(0, 0, 1, 0), scale=1.25)
+                                  pos=(25.3 + offset_x, -1.5 + offset_y, 0.1), rot=(0, 0, 1, 0), scale=1.25)
         actor2 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock2", fix_base_link=False,
-                                  pos=(14.5 + offset_x, 2 + offset_y, 0.1), rot=(0.3, 0.2, 0.1, 1), scale=1.3)
+                                  pos=(14.5 + offset_x, 2.2 + offset_y, 0.1), rot=(0.3, 0.2, 0.1, 1), scale=1.3)
         actor3 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock3", fix_base_link=False,
                                   pos=(19 + offset_x, 2.8 + offset_y, 0.1), rot=(0.2, 0.1, 0.8, 0), scale=1.55)
         actor4 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock4", fix_base_link=False,
@@ -122,13 +126,13 @@ class WildTerrainEnvTest1:
         actor5 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock5", fix_base_link=False,
                                   pos=(15 + offset_x, -2 + offset_y, 0.1), rot=(0, 0, 0, 1), scale=1.45)
         actor6 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock6", fix_base_link=False,
-                                  pos=(21 + offset_x, -.2 + offset_y, 0.1), rot=(0.1, 0.2, 0.2, 0), scale=1.7)
+                                  pos=(21.2 + offset_x, -.2 + offset_y, 0.1), rot=(0.1, 0.2, 0.2, 0), scale=1.7)
         actor7 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock7", fix_base_link=False,
                                   pos=(17.5 + offset_x, -2.5 + offset_y, 0.1), rot=(0.2, 0, 0.8, 0), scale=1.55)
         actor8 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock8", fix_base_link=False,
-                                  pos=(17 + offset_x, 3.2 + offset_y, 0.1), rot=(0.2, 0, 0.8, 0), scale=1.25)
+                                  pos=(17 + offset_x, 3.5 + offset_y, 0.1), rot=(0.2, 0, 0.8, 0), scale=1.25)
         actor9 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock9", fix_base_link=False,
-                                  pos=(20.5 + offset_x, 1 + offset_y, 0.1), rot=(0.3, -0.2, -0.8, 0), scale=1.65)
+                                  pos=(20.5 + offset_x, 1.25 + offset_y, 0.1), rot=(0.3, -0.2, -0.8, 0), scale=1.65)
         actor10 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock10", fix_base_link=False,
                                    pos=(21.5 + offset_x, -3.3 + offset_y, 0.1), rot=(-0.3, 0, -0.8, 0), scale=1.15)
         actor11 = load_stone_asset(self._gym, self._sim, env=env, name="Mountain Rock11", fix_base_link=False,
@@ -186,34 +190,34 @@ class WildTerrainEnvTest1:
         self._actors.append(actor8)
 
     def load_random_snowstones_in_a_region(self, env, scene_offset_x=40, width=4.0, length=5.0, stone_nums=10,
-                                           reverse=False):
+                                           scale_size=(0.1, 0.18), reverse=False, random_seed=25):
+        np.random.seed(random_seed)
         if reverse:
             offset_x = -13 + scene_offset_x
         else:
             offset_x = 8.1 + scene_offset_x
-        offset_y = -5
-        np.random.seed(25)
+        offset_y = -3
         for i in range(stone_nums):
             random_width = np.random.uniform(low=0, high=width)
             random_length = np.random.uniform(low=0, high=length)
             random_quat = random_quaternion()
-            scale = np.random.uniform(low=0.1, high=0.18)
+            scale = np.random.uniform(low=scale_size[0], high=scale_size[1])
 
             x = offset_x + random_length
             y = offset_y + random_width
 
-            stone_actor = load_stone_asset(self._gym, self._sim, env=env, name=f"snow_stones{i}", pos=(x, y, 0.03),
+            stone_actor = load_stone_asset(self._gym, self._sim, env=env, name=f"snow_stones{i}", pos=(x, y, 0.1),
                                            fix_base_link=False, rot=tuple(random_quat), apply_texture=False,
                                            scale=scale)
             self._actors.append(stone_actor)
 
-    def load_random_cobblestones_in_a_region(self, env, scene_offset_x=40, width=2.0, length=2.0, stone_nums=10,
-                                             reverse=False):
+    def load_random_cobblestones_in_a_region(self, env, scene_offset_x=40, scene_offset_y=0, width=2.0, length=2.0,
+                                             stone_nums=10, reverse=False):
         if reverse:
             offset_x = -8.1 + scene_offset_x
         else:
             offset_x = 6 + scene_offset_x
-        offset_y = -0.985
+        offset_y = -0.985 + scene_offset_y
         np.random.seed(12)
         for i in range(stone_nums):
             random_width = np.random.uniform(low=0, high=width)
@@ -252,23 +256,3 @@ class WildTerrainEnvTest1:
         actor1 = load_dead_wood_asset(self._gym, self._sim, env=env, name="Dead Wood 1", fix_base_link=True,
                                       pos=(17 + offset_x, -1 + offset_y, -0.2), rot=(0.707, 0, 0, 0.707), scale=1.)
         self._actors.append(actor1)
-
-    def check_collision(self, robot_env_handle, obstacle_id):
-        """check collision between the robot and the obstacle"""
-
-        # self._gym.
-
-        contact_tensor = self._gym.get_sim_rigid_contacts(sim)
-        if contact_tensor is None:
-            return False
-
-        contact_data = gymtorch.wrap_tensor(contact_tensor)
-
-        for contact in contact_data:
-            actor0 = contact[0].item()  # 获取 actor0 ID
-            actor1 = contact[1].item()  # 获取 actor1 ID
-
-            if (actor0 == robot_id and actor1 == obstacle_id) or (actor0 == obstacle_id and actor1 == robot_id):
-                return True  # 发生碰撞
-
-        return False  # 没有发生碰撞

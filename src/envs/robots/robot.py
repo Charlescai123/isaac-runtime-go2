@@ -278,7 +278,6 @@ class Robot:
         self._base_quat = self._root_states[:self._num_envs, 3:7]
         self._base_rot_mat = quat_to_rot_mat(self._base_quat)
         self._base_rot_mat_t = torch.transpose(self._base_rot_mat, 1, 2)
-        # print(f"self._base_rot_mat_t: {self._base_rot_mat_t}")
 
         self._contact_forces = (net_contact_forces.view(self._num_envs, -1, 3))  # shape: num_envs, num_bodies, xyz axis
         self._motor_torques = dof_force.view(self._num_envs, self._num_dof)
@@ -432,11 +431,13 @@ class Robot:
 
         print(f"foot_contact_history: {self._foot_positions_prev}")
 
-    def set_robot_base_color(self, color, env_ids=0):
+    def set_robot_base_color(self, color, env_ids=torch.arange(0, 1, device='cuda:0')):
         base_rigid_body_idx = 0
-        base_color = gymapi.Vec3(*color)  # 变为红色
-        self._gym.set_rigid_body_color(self._envs[env_ids], self._robot_actors[env_ids], base_rigid_body_idx,
-                                       gymapi.MESH_VISUAL, base_color)
+        base_color = gymapi.Vec3(*color)
+        for env_id in env_ids:
+            idx = env_id.item()
+            self._gym.set_rigid_body_color(self._envs[idx], self._robot_actors[idx], base_rigid_body_idx,
+                                           gymapi.MESH_VISUAL, base_color)
 
     def get_motor_angles_from_foot_positions(self, foot_local_positions):
         raise NotImplementedError()
@@ -484,9 +485,6 @@ class Robot:
 
     @property
     def base_velocity_body_frame(self):
-        # print(f"self._root_states: {self._root_states}")
-        # print(f"self._base_rot_mat_t: {self._base_rot_mat_t}")
-        # print(f"res: {torch.bmm(self._base_rot_mat_t, self._root_states[:, 7:10, None])[:, :, 0]}")
         return torch.bmm(self._base_rot_mat_t, self._root_states[:self._num_envs, 7:10, None])[:, :, 0]
 
     @property
@@ -566,6 +564,11 @@ class Robot:
     @property
     def has_body_contact(self):
         return torch.any(torch.norm(self._contact_forces[:, self._body_indices, :], dim=-1) > 1., dim=1)
+
+    @property
+    def has_dense_body_contact(self):
+        dense_threshold = 100
+        return torch.any(torch.norm(self._contact_forces[:, self._body_indices, :], dim=-1) > dense_threshold, dim=1)
 
     @property
     def hip_positions_in_body_frame(self):

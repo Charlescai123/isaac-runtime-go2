@@ -23,7 +23,7 @@ from src.envs.robots.modules.gait_generator import phase_gait_generator
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.motors import MotorControlMode
 from isaacgym.terrain_utils import *
-from src.envs.terrains.wild_env import WildTerrainEnv
+from src.envs.terrains.wild_terrain_env import WildTerrainEnv
 from src.utils.utils import energy_value_2d, ActionMode
 from src.physical_design import MATRIX_P
 

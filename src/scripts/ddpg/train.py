@@ -1,5 +1,6 @@
 """Train DDPG policy using implementation from RSL_RL."""
-
+import logging
+import pickle
 import time
 
 import numpy as np
@@ -16,17 +17,20 @@ import os
 from ml_collections.config_flags import config_flags
 from rsl_rl.runners import OffPolicyRunner
 
+from src.configs.training import ddpg
 from src.envs import env_wrappers
 
-config_flags.DEFINE_config_file("config", "src/configs/trot.py", "experiment configuration.")
+config_flags.DEFINE_config_file("config", "src/configs/wild_env_config.py", "experiment configuration.")
 flags.DEFINE_integer("num_envs", 1, "number of parallel environments.")
 flags.DEFINE_bool("use_gpu", True, "whether to use GPU.")
-flags.DEFINE_bool("enable_ha_teacher", True, "whether to enable the HA-Teacher.")
+flags.DEFINE_bool("enable_ha_teacher", False, "whether to enable the HA-Teacher.")
 flags.DEFINE_bool("enable_pusher", False, "whether to enable the robot pusher.")
 flags.DEFINE_bool("use_real_robot", False, "whether to use real robot.")
 flags.DEFINE_bool("show_gui", True, "whether to show GUI.")
 flags.DEFINE_string("logdir", "logs", "logdir.")
 flags.DEFINE_string("load_checkpoint", None, "checkpoint to load.")
+flags.DEFINE_string("experiment_name", None, "experimental name to set.")
+
 FLAGS = flags.FLAGS
 
 
@@ -41,9 +45,16 @@ def convert_numpy(obj):
 
 
 def main(argv):
+
     del argv  # unused
+    logging.disable(logging.CRITICAL)  # logging output
+
     device = "cuda" if FLAGS.use_gpu else "cpu"
     config = FLAGS.config
+
+    # Experimental name set
+    if FLAGS.experiment_name:
+        config.training.runner.experiment_name = FLAGS.experiment_name
 
     logdir = os.path.join(FLAGS.logdir, config.training.runner.experiment_name,
                           datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
@@ -52,11 +63,14 @@ def main(argv):
     with open(os.path.join(logdir, "config.yaml"), "w", encoding="utf-8") as f:
         f.write(config.to_yaml())
 
+    # Use DDPG
+    config.training = ddpg.get_training_config()
+
     # HA-Teacher module
     if FLAGS.enable_ha_teacher:
         config.environment.ha_teacher.enable = True
-        config.environment.ha_teacher.chi = 0.15
-        config.environment.ha_teacher.tau = 40
+        # config.environment.ha_teacher.chi = 0.1
+        # config.environment.ha_teacher.tau = 100
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -70,8 +84,6 @@ def main(argv):
     env = env_wrappers.RangeNormalize(env)
 
     mean_pos = torch.min(env.robot.base_position_world, dim=0)[0].cpu().numpy() + np.array([-2.5, -2.5, 2.5])
-    # mean_pos = torch.min(self.base_position_world,
-    #                      dim=0)[0].cpu().numpy() + np.array([0.5, -1., 0.])
     target_pos = torch.mean(env.robot.base_position_world, dim=0).cpu().numpy() + np.array([0., 2., -0.5])
     cam_pos = gymapi.Vec3(*mean_pos)
     cam_target = gymapi.Vec3(*target_pos)

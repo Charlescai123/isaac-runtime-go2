@@ -4,7 +4,7 @@ import sys
 import copy
 import pickle
 import time
-
+import pandas as pd
 import numpy as np
 import isaacgym
 from src.utils.utils import ActionMode
@@ -13,7 +13,32 @@ import matplotlib.gridspec as gridspec
 from matplotlib.collections import LineCollection
 
 
-def plot_robot_trajectory(filepath: str, device:str) -> None:
+def find_latest_file(dir):
+    latest_file = None
+    latest_mtime = None
+
+    for root, dirs, files in os.walk(dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            mtime = os.path.getmtime(file_path)
+            if latest_mtime is None or mtime > latest_mtime:
+                latest_file = file_path
+                latest_mtime = mtime
+
+    return latest_file
+
+
+def calc_stepwise_integral(array_y: np.array,
+                           array_x: np.array):
+    assert array_y.shape == array_x.shape
+    sum_integral = []
+    for i in range(array_y.shape[0]):
+        step_integral = np.trapz(array_y[:i], array_x[:i])
+        sum_integral.append(step_integral)
+    return np.array(sum_integral)
+
+
+def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> None:
     with open(filepath, 'rb') as f:
         phases = pickle.load(f)
 
@@ -43,10 +68,13 @@ def plot_robot_trajectory(filepath: str, device:str) -> None:
     min_ddq = []
 
     # HA-Teacher/HP-Student Action
-    energy = []
+    lyapunov_energy = []
     action_mode = []
     hp_action = []
     ha_action = []
+
+    # Motor Energy
+    motor_power = []
 
     for i in range(len(phases)):
 
@@ -73,7 +101,7 @@ def plot_robot_trajectory(filepath: str, device:str) -> None:
         max_ddq.append(phases[i]['acc_max'].tolist())
 
         # Learning Machine
-        energy.append(phases[i]['energy'].tolist())
+        lyapunov_energy.append(phases[i]['lyapunov_energy'].tolist())
         action_mode.append(phases[i]['action_mode'].cpu().numpy().squeeze())
         hp_action.append(phases[i]['hp_action'].cpu().numpy().squeeze())
 
@@ -82,12 +110,15 @@ def plot_robot_trajectory(filepath: str, device:str) -> None:
         else:
             ha_action.append(phases[i]['ha_action'].tolist())
 
+        # Motor statistics
+        motor_power.append(phases[i]['motor_power'].tolist())
+
     drl_ddq = np.array(drl_ddq)
     phy_ddq = np.array(phy_ddq)
     total_ddq = np.array(total_ddq)
     max_ddq = np.array(max_ddq)
     min_ddq = np.array(min_ddq)
-    energy = np.array(energy)
+    lyapunov_energy = np.array(lyapunov_energy)
     ha_action = np.array(ha_action)
     hp_action = np.array(hp_action)
     hp_action = np.expand_dims(hp_action, axis=-1)
@@ -97,11 +128,12 @@ def plot_robot_trajectory(filepath: str, device:str) -> None:
     # ha_action = ha_action.squeeze()
     # ha_action = np.expand_dims(ha_action, axis=-1)
     action_mode = np.array(action_mode)
+    motor_power = np.array(motor_power)
 
     action_mode = action_mode.squeeze()
     hp_action = hp_action.squeeze()
     ha_action = ha_action.squeeze()
-    energy = energy.squeeze()
+    lyapunov_energy = lyapunov_energy.squeeze()
 
     timestamp = np.asarray(timestamp)
     position = np.asarray(position).squeeze()
@@ -118,7 +150,7 @@ def plot_robot_trajectory(filepath: str, device:str) -> None:
     angular_vel = np.asarray(angular_vel).squeeze()
     rpy = np.asarray(rpy).squeeze()
 
-    ###########  Reference plot  ###########
+    ############################  Reference plot  ############################
     position_ref = copy.deepcopy(position)
     position_ref[:, 0] = 0
     position_ref[:, 1] = 0
@@ -316,9 +348,9 @@ def plot_robot_trajectory(filepath: str, device:str) -> None:
     axes2.legend(fontsize=legend_font2)
 
     axes2 = fig2.add_subplot(gs[2, :])
-    energy = np.expand_dims(energy, axis=-1)
+    lyapunov_energy = np.expand_dims(lyapunov_energy, axis=-1)
 
-    points = np.array([step, energy[:]]).T.reshape(-1, 1, 2)
+    points = np.array([step, lyapunov_energy[:]]).T.reshape(-1, 1, 2)
     segments = np.concatenate([points[:-1], points[1:]], axis=1)
     lc = LineCollection(segments, colors=seg_colors)
     axes2.add_collection(lc)
@@ -326,210 +358,91 @@ def plot_robot_trajectory(filepath: str, device:str) -> None:
         axes2.plot([], [], color=color, label=f'{mode}')
     axes2.autoscale()
 
-    # axes2.plot(step, energy[:], zorder=1, label='energy')
+    # axes2.plot(step, lyapunov_energy[:], zorder=1, label='lyapunov_energy')
     axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('energy', fontsize=label_font2)
+    axes2.set_ylabel('lyapunov_energy', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
+
+    ############################    Motor Statistics    ############################
+    fig3 = plt.figure()
+    gs = gridspec.GridSpec(2, 1, figure=fig)
+    label_font2 = 14
+    legend_font2 = 14
+    colors = {ActionMode.STUDENT.value: 'blue', ActionMode.TEACHER.value: 'red'}
+
+    # Generate a color list
+    seg_colors = [colors[mode.item()] for mode in action_mode[:-1]]
+    # print(f"seg_colors: {seg_colors}")
+
+    # print(f"min_ddq: {min_ddq}")
+    # print(f"min_ddq: {min_ddq.shape}")
+
+    # Power consumption
+    axes3 = fig3.add_subplot(gs[0, 0])
+    axes3.plot(step, motor_power[:], zorder=4, label='motor_power')
+    axes3.plot(step, hp_action[:, 0], zorder=3, label='hp_vx')
+    axes3.plot(step, ha_action[:, 0], zorder=2, label='ha_vx')
+    # axes3.plot(step, min_ddq[:, 0], zorder=1, label='ddq_min')
+    # axes3.plot(step, max_ddq[:, 0], zorder=1, label='ddq_max')
+    axes3.set_xlabel('Time/s', fontsize=label_font2)
+    axes3.set_ylabel('motor power', fontsize=label_font2)
+    axes3.legend(fontsize=legend_font2)
+
+    # Energy consumption
+    stepwise_energy = calc_stepwise_integral(motor_power.squeeze(), timestamp.squeeze())
+    axes3 = fig3.add_subplot(gs[1, 0])
+    axes3.plot(step, stepwise_energy[:], zorder=4, label='motor_energy')
+    axes3.plot(step, hp_action[:, 0], zorder=3, label='hp_vx')
+    axes3.plot(step, ha_action[:, 0], zorder=2, label='ha_vx')
+    # axes3.plot(step, min_ddq[:, 0], zorder=1, label='ddq_min')
+    # axes3.plot(step, max_ddq[:, 0], zorder=1, label='ddq_max')
+    axes3.set_xlabel('Time/s', fontsize=label_font2)
+    axes3.set_ylabel('motor energy', fontsize=label_font2)
+    axes3.legend(fontsize=legend_font2)
 
     fig.subplots_adjust(left=0.06, right=0.943, top=0.95, bottom=0.076, wspace=0.16, hspace=0.19)
     fig2.subplots_adjust(left=0.052, right=0.986, top=0.968, bottom=0.06, wspace=0.145, hspace=0.179)
     # plt.tight_layout()
     plt.show()
 
+    sum_energy = np.trapz(motor_power.squeeze(), timestamp.squeeze())
+    print(f"Average Motor Power (Unit: Watt/N·m): {motor_power.mean()}")
+    print(f"Sum of Consumed Motor Energy (Unit: J): {sum_energy}")
+    # Save to csv file
+    if save2csv:
+        # Data collections to csv file
+        data = {
+            'Timestamp': timestamp.squeeze(),
+            'ActionMode': action_mode.squeeze(),
+            'Lyapunov_energy': lyapunov_energy.squeeze(),
+            'px': position[:, 0].squeeze(),
+            'py': position[:, 1].squeeze(),
+            'pz': position[:, 2].squeeze(),
+            'roll': rpy[:, 0].squeeze(),
+            'pitch': rpy[:, 1].squeeze(),
+            'yaw': rpy[:, 2].squeeze(),
+            'vx': linear_vel[:, 0].squeeze(),
+            'vy': linear_vel[:, 1].squeeze(),
+            'vz': linear_vel[:, 2].squeeze(),
+            'wx': angular_vel[:, 0].squeeze(),
+            'wy': angular_vel[:, 1].squeeze(),
+            'wz': angular_vel[:, 2].squeeze(),
+            'px_ref': position_ref[:, 0].squeeze(),
+            'py_ref': position_ref[:, 1].squeeze(),
+            'pz_ref': position_ref[:, 2].squeeze(),
+            'roll_ref': rpy_ref[:, 0].squeeze(),
+            'pitch_ref': rpy_ref[:, 1].squeeze(),
+            'yaw_ref': rpy_ref[:, 2].squeeze(),
+            'vx_ref': linear_vel_ref[:, 0].squeeze(),
+            'vy_ref': linear_vel_ref[:, 1].squeeze(),
+            'vz_ref': linear_vel_ref[:, 2].squeeze(),
+            'wx_ref': angular_vel_ref[:, 0].squeeze(),
+            'wy_ref': angular_vel_ref[:, 1].squeeze(),
+            'wz_ref': angular_vel_ref[:, 2].squeeze(),
+        }
 
-def find_latest_file(dir):
-    latest_file = None
-    latest_mtime = None
-
-    for root, dirs, files in os.walk(dir):
-        for file in files:
-            file_path = os.path.join(root, file)
-            mtime = os.path.getmtime(file_path)
-            if latest_mtime is None or mtime > latest_mtime:
-                latest_file = file_path
-                latest_mtime = mtime
-
-    return latest_file
-
-
-def save_trajectory_to_txt(filepath: str, outfile_path="data.csv") -> None:
-    with open(filepath, 'rb') as f:
-        phases = pickle.load(f)
-    print(f"phases: {len(phases)}")
-    print(f"phases: {phases[0]}")
-    # time.sleep(123)
-    zero_ref = []
-    step = []
-    desired_linear_vel = []
-    desired_com_height = []
-    desired_vx = []
-    desired_wz = []
-    linear_vel = []
-    rpy = []
-    position = []
-    timestamp = []
-    angular_vel = []
-    ground_reaction_forces = []
-    phy_ddq = []
-    drl_ddq = []
-    total_ddq = []
-    max_ddq = []
-    min_ddq = []
-    energy = []
-    action_mode = []
-    hp_action = []
-    ha_action = []
-
-    tracking_err = dict({
-        'p': [],
-        'rpy': [],
-        'v': [],
-        'rpy_dot': []
-    })
-
-    n = len(phases)
-    # print(f"phases: {phases}")
-
-    for i in range(len(phases)):
-
-        zero_ref.append(0)
-        step.append(i)
-
-        # phy_ddq.append(phases[i]['stance_ddq'][0])
-        # drl_ddq.append(phases[i]['stance_ddq'][1])
-        # total_ddq.append(phases[i]['stance_ddq'][2])
-        # min_ddq.append(phases[i]['stance_ddq_limit'][0])
-        # max_ddq.append(phases[i]['stance_ddq_limit'][1])
-
-        position.append(phases[i]['base_position'].tolist())
-        desired_com_height.append(phases[i]['desired_com_height'])
-        timestamp.append(phases[i]['timestamp'].tolist())
-        desired_vx.append(phases[i]['desired_vx'])
-        desired_wz.append(phases[i]['desired_wz'])
-        # desired_linear_vel.append(phases[i]['desired_speed'][0])
-        linear_vel.append(phases[i]['base_velocity'].tolist())
-        angular_vel.append(phases[i]['base_angular_velocity'].tolist())
-        rpy.append(phases[i]['base_orientation_rpy'].tolist())
-
-        ground_reaction_forces.append(phases[i]['foot_contact_force'].tolist())
-        # action_mode.append(phases[i]['action_mode'])
-        # print(content[i]['desired_linear_vel'])
-        # print(type(content[i]['desired_linear_vel']))
-        phy_ddq.append(phases[i]['desired_acc_body_frame'].tolist())
-        min_ddq.append(phases[i]['acc_min'].tolist())
-        max_ddq.append(phases[i]['acc_max'].tolist())
-
-        energy.append(phases[i]['energy'].tolist())
-        action_mode.append(phases[i]['action_mode'])
-        print(f"phases[i]['ha_action']: {phases[i]['ha_action']}")
-        hp_action.append(phases[i]['hp_action'].cpu().numpy().squeeze())
-
-        if phases[i]['ha_action'] is None:
-            ha_action.append(([0., 0., 0., 0., 0., 0.]))
-        else:
-            ha_action.append(phases[i]['ha_action'].tolist())
-
-    step = np.array(step)
-    drl_ddq = np.array(drl_ddq)
-    phy_ddq = np.array(phy_ddq)
-    total_ddq = np.array(total_ddq)
-    max_ddq = np.array(max_ddq)
-    min_ddq = np.array(min_ddq)
-    energy = np.array(energy)
-    ha_action = np.array(ha_action)
-    hp_action = np.array(hp_action)
-    hp_action = np.expand_dims(hp_action, axis=-1)
-    print(f"hp_action: {hp_action}")
-    print(f"ha_action: {ha_action}")
-    ha_action = np.where(ha_action is None, 0., ha_action)
-    # ha_action = ha_action.squeeze()
-    # ha_action = np.expand_dims(ha_action, axis=-1)
-    action_mode = np.array(action_mode)
-
-    actions_in_ha = ha_action[action_mode == ActionMode.TEACHER]
-    actions_in_hp = ha_action[action_mode == ActionMode.STUDENT]
-    steps_in_ha = step[action_mode == ActionMode.TEACHER]
-    steps_in_hp = step[action_mode == ActionMode.STUDENT]
-
-    tracking_err['p'] = np.asarray(tracking_err['p'])
-    tracking_err['rpy'] = np.asarray(tracking_err['rpy'])
-    tracking_err['v'] = np.asarray(tracking_err['v'])
-    tracking_err['rpy_dot'] = np.asarray(tracking_err['rpy_dot'])
-    timestamp = np.asarray(timestamp)
-    position = np.asarray(position).squeeze()
-
-    # set position to zero
-    position[:, 0] = 0
-    position[:, 1] = 0
-
-    zero_ref = np.asarray(zero_ref)
-    linear_vel = np.asarray(linear_vel).squeeze()
-
-    desired_linear_vel = np.asarray(desired_linear_vel)
-    desired_com_height = np.asarray(desired_com_height)
-    desired_vx = np.asarray(desired_vx)
-    desired_wz = np.asarray(desired_wz)
-
-    angular_vel = np.asarray(angular_vel).squeeze()
-    rpy = np.asarray(rpy).squeeze()
-
-    position_ref = copy.deepcopy(position)
-    position_ref[:, 0] = 0
-    position_ref[:, 1] = 0
-    position_ref[:, 2] = desired_com_height
-
-    rpy_ref = copy.deepcopy(rpy)
-    rpy_ref[:, 0] = 0
-    rpy_ref[:, 1] = 0
-    rpy_ref[:, 2] = 0
-
-    linear_vel_ref = copy.deepcopy(linear_vel)
-    linear_vel_ref[:, 0] = desired_vx
-    linear_vel_ref[:, 1] = 0
-    linear_vel_ref[:, 2] = 0.0
-
-    angular_vel_ref = copy.deepcopy(angular_vel)
-    angular_vel_ref[:, 0] = 0
-    angular_vel_ref[:, 1] = 0
-    angular_vel_ref[:, 2] = desired_wz
-
-    # print(f"action_mode: {action_mode}")
-
-    import pandas as pd
-    step = timestamp
-    print(f"step: {step}")
-    data = {
-        'Timestamp': step.squeeze(),
-        'px': position[:, 0].squeeze(),
-        'py': position[:, 1].squeeze(),
-        'pz': position[:, 2].squeeze(),
-        'roll': rpy[:, 0].squeeze(),
-        'pitch': rpy[:, 1].squeeze(),
-        'yaw': rpy[:, 2].squeeze(),
-        'vx': linear_vel[:, 0].squeeze(),
-        'vy': linear_vel[:, 1].squeeze(),
-        'vz': linear_vel[:, 2].squeeze(),
-        'wx': angular_vel[:, 0].squeeze(),
-        'wy': angular_vel[:, 1].squeeze(),
-        'wz': angular_vel[:, 2].squeeze(),
-        'px_ref': position_ref[:, 0].squeeze(),
-        'py_ref': position_ref[:, 1].squeeze(),
-        'pz_ref': position_ref[:, 2].squeeze(),
-        'roll_ref': rpy_ref[:, 0].squeeze(),
-        'pitch_ref': rpy_ref[:, 1].squeeze(),
-        'yaw_ref': rpy_ref[:, 2].squeeze(),
-        'vx_ref': linear_vel_ref[:, 0].squeeze(),
-        'vy_ref': linear_vel_ref[:, 1].squeeze(),
-        'vz_ref': linear_vel_ref[:, 2].squeeze(),
-        'wx_ref': angular_vel_ref[:, 0].squeeze(),
-        'wy_ref': angular_vel_ref[:, 1].squeeze(),
-        'wz_ref': angular_vel_ref[:, 2].squeeze(),
-    }
-
-    df = pd.DataFrame(data)
-    df.to_csv(outfile_path, index=False)
-    # np.savetxt(outfile_path, (step,linear_vel[:, 0]), fmt="%f", delimiter=',')
-    # np.savetxt(outfile_path, , fmt="%f", delimiter=',')
+        df = pd.DataFrame(data)
+        df.to_csv(outfile_path, index=False)
 
 
 if __name__ == '__main__':
@@ -544,20 +457,14 @@ if __name__ == '__main__':
         folder_name = "eval"
         file_order = int(sys.argv[1])
 
-    # dir_name = f"logs/{folder_name}/2024_10_23_20_21_19"
+    # Find the folder and file according to the order
     dir_name = f"logs/{folder_name}"
-
-    # dir_name = "logs/robot/real_plant"
     files = os.listdir(dir_name)
     file_list = sorted(files, key=lambda x: os.path.getmtime(os.path.join(dir_name, x)))
-    print(f"filepath: {dir_name}/{file_list[file_order]}")
-    # fp = f"{dir_name}/eval_sim_2024_10_30_15_16_59.pkl"
     fp = f"{dir_name}/{file_list[file_order]}"
-    # dir_path = "logs/iclr_rebuttal/noise_and_push/Backward"
-    # fp = f"{dir_path}/data.pkl"
 
-    # plot_robot_trajectory(filepath=f"{fp}")
-    # save_trajectory_to_txt(fp, outfile_path=f"{dir_path}/data.csv")
-    plot_robot_trajectory(filepath=f"{fp}", device=device)
+    # Self-defined file
+    fp = f"logs/eval/runtime-learning.pkl"
 
-    # plot_robot_trajectory("saved/logs/real_plant/updated_patch.pkl")
+    # Plot trajectory and/or save to csv file
+    plot_trajectory(filepath=f"{fp}", save2csv=True)

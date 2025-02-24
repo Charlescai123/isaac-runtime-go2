@@ -1,4 +1,5 @@
 """Evaluate a trained policy."""
+import logging
 
 """
 python -m src.scripts.ppo.eval --logdir=logs/train/ddpg_trot/demo --num_envs=1 --use_gpu=False --show_gui=True --use_real_robot=False --save_traj=True
@@ -52,8 +53,8 @@ def get_latest_policy_path(logdir):
 
 def main(argv):
     del argv  # unused
-    # print(f"flag: {FLAGS.save_traj}")
-    # time.sleep(123)
+    logging.disable(logging.CRITICAL)  # logging output
+
     device = "cuda" if FLAGS.use_gpu else "cpu"
 
     # Load config and policy
@@ -69,11 +70,6 @@ def main(argv):
 
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.load(f, Loader=yaml.Loader)
-
-    with config.unlocked():
-        config.environment.jumping_distance_schedule = [1., 0.3]
-        # config.environment.qp_body_inertia = np.array([0.14, 0.35, 0.35]) * 6
-        config.environment.max_jumps = 6
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -111,12 +107,11 @@ def main(argv):
     env._torque_optimizer._base_orientation_kd *= 1
     env._torque_optimizer._base_orientation_kp *= 1
     # env._swing_leg_controller._foot_landing_clearance = 0.1    # current 0
-    env._swing_leg_controller._foot_height = 0.15  # current 0.1
+    # env._swing_leg_controller._foot_height = 0.15  # current 0.1
 
     print(f"swing: {env._swing_leg_controller._foot_landing_clearance}")
     print(f"swing: {env._swing_leg_controller._desired_base_height}")
     print(f"swing: {env._swing_leg_controller._foot_height}")
-    # time.sleep(123)
     print(f"robot: {env._torque_optimizer._base_position_kp}")
     print(f"robot: {env._torque_optimizer._base_position_kd}")
     print(f"robot: {env._torque_optimizer._base_orientation_kp}")
@@ -133,7 +128,7 @@ def main(argv):
             action = policy(state)
             print(f"action is: {action}")
             # action = torch.zeros(6).unsqueeze(dim=0)
-            state, _, reward, done, info = env.step(action)
+            state, _, _, reward, done, info = env.step(action)
             print(f"Time: {env.robot.time_since_reset}, Reward: {reward}")
 
             total_reward += reward

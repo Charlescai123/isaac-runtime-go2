@@ -30,6 +30,8 @@ class DDPG(AbstractDPG):
             env: VecEnv,
             actor_lr: float = 1e-4,
             critic_lr: float = 1e-3,
+            init_noise_std: float = 1.,
+            noise_decay_rate: float = 0.998,
             **kwargs,
     ) -> None:
 
@@ -49,8 +51,12 @@ class DDPG(AbstractDPG):
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
 
-        init_noise_std = 0.1
+        # Exploration noise
+        self.noise_decay_rate = noise_decay_rate
+        self.init_noise_std = torch.full((self._action_size,), init_noise_std, device=self.device)
         self.std = nn.Parameter(init_noise_std * torch.ones(self._action_size, device=self.device))
+        self.min_noise_std = torch.zeros(self._action_size, device=self.device)
+        self.time_cnt = 0
 
         self._register_serializable(
             "actor", "critic", "target_actor", "target_critic", "actor_optimizer", "critic_optimizer"
@@ -70,21 +76,6 @@ class DDPG(AbstractDPG):
 
     def act(self, obs, critic_obs):
 
-        # print(f"obs: {obs.shape}")
-        # print(f"critic_obs: {critic_obs.shape}")
-        #
-        # # if self.actor_critic.is_recurrent:
-        # #     self.transition.hidden_states = self.actor_critic.get_hidden_states()
-        # # Compute the actions and values
-        # print(f"self.nn_act(obs).detach().detach(): {self.evaluate(critic_obs).detach().shape}")
-        # self.transition.actions = self.nn_act(obs).detach()
-        # self.transition.values = self.evaluate(critic_obs).detach()
-        # self.transition.actions_log_prob = self.get_actions_log_prob(self.transition.actions).detach()
-        # self.transition.action_mean = self.action_mean.detach()
-        # self.transition.action_sigma = self.action_std.detach()
-        # # need to record obs and critic_obs before env.step()
-        # self.transition.observations = obs
-        # self.transition.critic_observations = critic_obs
         return self.nn_act(obs).detach()
 
     def to(self, device: str) -> DDPG:
@@ -133,7 +124,7 @@ class DDPG(AbstractDPG):
             target = rewards + self._discount_factor * (1 - dones) * target_critic_prediction
             prediction = self.critic.forward(self._critic_input(critic_obs, actions))
 
-            # Optimize Critic
+            # Critic Loss
             critic_loss = (prediction - target).pow(2).mean()
             self.critic_optimizer.zero_grad()
             critic_loss.backward(retain_graph=True)
@@ -143,6 +134,7 @@ class DDPG(AbstractDPG):
                 self._critic_input(critic_obs, self._process_actions(self.actor.forward(actor_obs)))
             )
 
+            # Actor Loss
             actor_loss = -evaluation.mean()
             self.actor_optimizer.zero_grad()
             actor_loss.backward(retain_graph=True)
@@ -172,19 +164,25 @@ class DDPG(AbstractDPG):
 
     def update_distribution(self, observations):
         mean = self.actor(observations)
-        self.distribution = Normal(mean, mean * 0. + self.std)
+
+        # Annealing for noise
+        # with torch.no_grad():
+        #     if self.time_cnt % 100:
+        #         self.std = torch.max(self.min_noise_std, self.std * self.noise_decay_rate)
+        #     self.time_cnt += 1
+
+        self.distribution = Normal(mean, torch.clamp(self.std, min=1e-6))
 
     def nn_act(self, observations, **kwargs):
         self.update_distribution(observations)
-        return self.distribution.sample()
+
+        return torch.clamp(self.distribution.sample(), min=0., max=1.)
 
     def get_actions_log_prob(self, actions):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def act_inference(self, observations):
         actions_mean = self.actor(observations)
-        # print(f"observations: {observations}")
-        # print(f"actions_mean: {actions_mean}")
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):

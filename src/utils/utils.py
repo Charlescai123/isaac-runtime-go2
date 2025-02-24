@@ -38,6 +38,12 @@ def energy_value_2d(state: torch.Tensor, p_mat: torch.Tensor) -> torch.Tensor:
     return torch.sum(sp * state, dim=1)
 
 
+def check_safety(error_state: torch.Tensor, safety_subset: torch.Tensor):
+    """Check current safety condition w.r.t the system's error states"""
+    is_activate = torch.abs(error_state[:, 2:]) >= safety_subset
+    return is_activate.any(dim=1)
+
+
 def generate_seed_sequence(seed, num_seeds):
     np.random.seed(seed)
     return np.random.randint(0, 100, size=num_seeds)

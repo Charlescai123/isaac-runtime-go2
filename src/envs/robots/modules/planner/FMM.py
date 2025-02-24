@@ -35,7 +35,7 @@ def get_dist(sx, sy, step_size):
 
 
 class FMMPlanner:
-    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=450, obstacle_dist_ratio=1,
+    def __init__(self, traversable, add_obstacle_dist=True, obstacle_dist_cap=600, obstacle_dist_ratio=1,
                  resolution=0.015):
         self.traversable = traversable
         self.fmm_dist = None
@@ -104,19 +104,7 @@ class FMMPlanner:
         return dd
 
     def get_short_term_goal(self, pos, yaw, lin_speed):
-        pos_int = [int(x) for x in pos]
-
-        # Restrict to the occupancy map district
-        pos_int[0] = max(0, min(pos_int[0], self.fmm_dist.shape[0]))
-        pos_int[1] = max(0, min(pos_int[1], self.fmm_dist.shape[1]))
-
-        # Threshold
-        # arrival_radius = 0.4
-        arrival_radius = 0.6
-        if self.fmm_dist[pos_int[0], pos_int[1]] < arrival_radius / self.resolution:  # 0.25 m
-            stop = True
-        else:
-            stop = False
+        stop = self.is_near_goal(pos_in_map=pos)
 
         # step_sizes = (lin_speed + self.speeds) / 2 * self.conservative_step_size_factor
 
@@ -160,8 +148,8 @@ class FMMPlanner:
 
     def get_fmm_value(self, coords):
         y, x = coords[:, 0], coords[:, 1]
-        y_out = np.logical_or(y < 0, y > self.fmm_dist.shape[0])
-        x_out = np.logical_or(x < 0, x > self.fmm_dist.shape[1])
+        y_out = np.logical_or(y < 0, y >= self.fmm_dist.shape[0])
+        x_out = np.logical_or(x < 0, x >= self.fmm_dist.shape[1])
         yx_out = np.logical_or(y_out, x_out)
         out_bools = np.stack([yx_out, yx_out], axis=-1)
         out_coords = np.where(yx_out)
@@ -203,3 +191,19 @@ class FMMPlanner:
         goal = np.unravel_index(dist_map.argmin(), dist_map.shape)
 
         return goal
+
+    def is_near_goal(self, pos_in_map, arrival_radius=0.6):
+        """Determine whether the goal has been reached
+        pos_in_map: The position on map
+        arrival_radius: Arrival radius as a circle with unit meter (Threshold for checking goal reaching)
+        """
+        pos_int = [int(x) for x in pos_in_map]
+
+        # Restrict to the occupancy map district
+        pos_int[0] = max(0, min(pos_int[0], self.fmm_dist.shape[0] - 1))
+        pos_int[1] = max(0, min(pos_int[1], self.fmm_dist.shape[1] - 1))
+
+        if self.fmm_dist[pos_int[0], pos_int[1]] <= arrival_radius / self.resolution:  # 0.25 m
+            return True
+        else:
+            return False
