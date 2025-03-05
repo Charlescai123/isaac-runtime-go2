@@ -205,6 +205,7 @@ class Go2WildExploreEnv:
                                     num_envs=self._num_envs,
                                     device=self._device)
         self.sub_goal_reach_flag = False
+        self.sub_goal_reach_time = []
 
         # Episodic statistics
         self._go2_reward = Go2Rewards(self, reward_cfg=config.reward)
@@ -221,6 +222,7 @@ class Go2WildExploreEnv:
         self._cycle_count = torch.zeros(self._num_envs, device=self._device)
         self._teacher_activation_times = torch.zeros(self._num_envs, device=self._device)
         self._student_activation_times = torch.zeros(self._num_envs, device=self._device)
+        self.last_goal_distance = self.goal_distance
         # self._motor_energy_consumption = []
 
         self._extras = dict()
@@ -332,6 +334,8 @@ class Go2WildExploreEnv:
 
                 # Take the trajectory generated from the planner
                 ut, self.sub_goal_reach_flag = self._planner.get_reference_trajectory()
+                if self.sub_goal_reach_flag:
+                    self.sub_goal_reach_time.append(self._step_count)
                 vel_x = ut[0] * 1
                 ref_wz = ut[1] * 1
 
@@ -344,6 +348,7 @@ class Go2WildExploreEnv:
                     self._goal_position[0, :2] = to_torch(self._planner.goal, dtype=torch.float32, device=self._device)
 
             else:
+                time.sleep(0.02)
                 self.desired_vx = 0.
                 self.desired_wz = 0.
 
@@ -371,10 +376,17 @@ class Go2WildExploreEnv:
             )
 
             # HP-Student action (residual form)
-            # weights = to_torch([1.1, 1., 1., 0.5, 0.5, 0.5], device=self._device)
-            drl_action_res = drl_action * self._gamma
-            phy_action_res = self._solved_acc * (1 - self._gamma)
+            raw_weights = to_torch([1.5, 0.5, 0.5, 0.1, 0.1, 0.5], device=self._device)
+            weights = self._gamma
+            drl_action_res = drl_action * weights
+            phy_action_res = self._solved_acc * (1 - weights)
             hp_action = drl_action_res + phy_action_res
+            # print(f"drl_action_res: {drl_action_res}")
+            # print(f"phy_action_res: {phy_action_res}")
+            # print(f"hp_action: {hp_action}")
+            # print(f"drl action: {drl_action}")
+            # import pdb
+            # pdb.set_trace()
 
             # HA-Teacher update
             self._robot.energy_2d = self.ha_teacher.update(self._torque_optimizer.tracking_error)
@@ -428,7 +440,7 @@ class Go2WildExploreEnv:
                 self._teacher_activation_times[ha_indices] += 1
                 self.robot.set_robot_base_color(color=(1., 0, 0), env_ids=ha_indices)  # Display Red
                 # Nominal actions for HP-student
-                nominal_actions[ha_indices] = (ha_action[ha_indices] - phy_action_res[ha_indices]) / self._gamma
+                nominal_actions[ha_indices] = (ha_action[ha_indices] - phy_action_res[ha_indices]) / weights
 
             # Unknown Action Mode
             if len(hp_indices) == 0 and len(ha_indices) == 0:
@@ -542,6 +554,7 @@ class Go2WildExploreEnv:
         self._last_obs_buf = torch.clone(self._obs_buf)
         self._last_action = torch.clone(drl_action)
         self._last_terminal_action = torch.clone(self._terminal_stance_ddq)
+        self.last_goal_distance = self.goal_distance
 
         end = time.time()
         logging.info(f"***************** step duration: {end - start} *****************")
@@ -641,6 +654,9 @@ class Go2WildExploreEnv:
 
         # Check the termination
         is_terminated = self._is_terminate()
+        # if torch.any(is_terminated):
+        #     import pdb
+        #     pdb.set_trace()
 
         return torch.logical_or(is_terminated, is_fail), is_fail
 

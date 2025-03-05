@@ -181,85 +181,85 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     # Vx
     axes[0, 0].plot(step, linear_vel_ref[:, 0], zorder=2, label='desire_vx')
     axes[0, 0].plot(step, linear_vel[:, 0], zorder=1, label='vx')
-    axes[0, 0].set_xlabel('Time/s', fontsize=14)
-    axes[0, 0].set_ylabel('Vx', fontsize=14)
+    axes[0, 0].set_xlabel('Time (s)', fontsize=14)
+    axes[0, 0].set_ylabel('Vx (m/s)', fontsize=14)
     axes[0, 0].legend(fontsize=12)
 
     # Vy
     axes[0, 1].plot(step, linear_vel_ref[:, 1], zorder=2, label='desire_vy')
     axes[0, 1].plot(step, linear_vel[:, 1], zorder=1, label='vy')
-    axes[0, 1].set_xlabel('Time/s', fontsize=14)
-    axes[0, 1].set_ylabel('Vy', fontsize=14)
+    axes[0, 1].set_xlabel('Time (s)', fontsize=14)
+    axes[0, 1].set_ylabel('Vy (m/s)', fontsize=14)
     axes[0, 1].legend(fontsize=12)
 
     # Vz
     axes[0, 2].plot(step, linear_vel_ref[:, 2], zorder=2, label='desire_vz')
     axes[0, 2].plot(step, linear_vel[:, 2], zorder=1, label='vz')
-    axes[0, 2].set_xlabel('Time/s', fontsize=14)
-    axes[0, 2].set_ylabel('Vz', fontsize=14)
+    axes[0, 2].set_xlabel('Time (s)', fontsize=14)
+    axes[0, 2].set_ylabel('Vz (m/s)', fontsize=14)
     axes[0, 2].legend(fontsize=12)
 
     # Roll
     axes[1, 0].plot(step, rpy_ref[:, 0], zorder=2, label='desired_roll')
     axes[1, 0].plot(step, rpy[:, 0], zorder=1, label='roll')
     axes[1, 0].set_xlabel('Time', fontsize=14)
-    axes[1, 0].set_ylabel('Roll', fontsize=14)
+    axes[1, 0].set_ylabel('Roll (rad)', fontsize=14)
     axes[1, 0].legend(fontsize=12)
 
     # Pitch
     axes[1, 1].plot(step, rpy_ref[:, 1], zorder=2, label='desire_pitch')
     axes[1, 1].plot(step, rpy[:, 1], zorder=1, label='pitch')
     axes[1, 1].set_xlabel('Time', fontsize=14)
-    axes[1, 1].set_ylabel('Pitch', fontsize=14)
+    axes[1, 1].set_ylabel('Pitch (rad)', fontsize=14)
     axes[1, 1].legend(fontsize=12)
 
     # Yaw
     axes[1, 2].plot(step, rpy_ref[:, 2], zorder=2, label='desire_yaw')
     axes[1, 2].plot(step, rpy[:, 2], zorder=1, label='yaw')
-    axes[1, 2].set_xlabel('Time/s', fontsize=14)
-    axes[1, 2].set_ylabel('Yaw', fontsize=14)
+    axes[1, 2].set_xlabel('Time (s)', fontsize=14)
+    axes[1, 2].set_ylabel('Yaw (rad)', fontsize=14)
     axes[1, 2].legend(fontsize=12)
 
     # Wx
     axes[2, 0].plot(step, angular_vel_ref[:, 0], zorder=2, label='desire_wx')
     axes[2, 0].plot(step, angular_vel[:, 0], zorder=1, label='wx')
-    axes[2, 0].set_xlabel('Time/s', fontsize=14)
-    axes[2, 0].set_ylabel('Wx', fontsize=14)
+    axes[2, 0].set_xlabel('Time (s)', fontsize=14)
+    axes[2, 0].set_ylabel('Wx (rad/s)', fontsize=14)
     axes[2, 0].legend(fontsize=12)
 
     # Wy
     axes[2, 1].plot(step, angular_vel_ref[:, 1], zorder=2, label='desire_wy')
     axes[2, 1].plot(step, angular_vel[:, 1], zorder=1, label='wy')
-    axes[2, 1].set_xlabel('Time/s', fontsize=14)
-    axes[2, 1].set_ylabel('Wy', fontsize=14)
+    axes[2, 1].set_xlabel('Time (s)', fontsize=14)
+    axes[2, 1].set_ylabel('Wy (rad/s)', fontsize=14)
     axes[2, 1].legend(fontsize=12)
 
     # Wz
     axes[2, 2].plot(step, angular_vel_ref[:, 2], zorder=2, label='desire_wz')
     axes[2, 2].plot(step, angular_vel[:, 2], zorder=1, label='wz')
-    axes[2, 2].set_xlabel('Time/s', fontsize=14)
-    axes[2, 2].set_ylabel('Wz', fontsize=14)
+    axes[2, 2].set_xlabel('Time (s)', fontsize=14)
+    axes[2, 2].set_ylabel('Wz (rad/s)', fontsize=14)
     axes[2, 2].legend(fontsize=12)
 
     # Px
     axes[3, 0].plot(step, zero_ref, zorder=2, label='desire_px')
     axes[3, 0].plot(step, zero_ref, zorder=1, label='px')
-    axes[3, 0].set_xlabel('Time/s', fontsize=14)
-    axes[3, 0].set_ylabel('Px', fontsize=14)
+    axes[3, 0].set_xlabel('Time (s)', fontsize=14)
+    axes[3, 0].set_ylabel('Px (m)', fontsize=14)
     axes[3, 0].legend(fontsize=12)
 
     # Py
     axes[3, 1].plot(step, zero_ref, zorder=2, label='desire_py')
     axes[3, 1].plot(step, zero_ref, zorder=1, label='py')
-    axes[3, 1].set_xlabel('Time/s', fontsize=14)
-    axes[3, 1].set_ylabel('Py', fontsize=14)
+    axes[3, 1].set_xlabel('Time (s)', fontsize=14)
+    axes[3, 1].set_ylabel('Py (m)', fontsize=14)
     axes[3, 1].legend(fontsize=12)
 
     # Pz
     axes[3, 2].plot(step, position_ref[:, 2], zorder=2, label='desire_pz')
     axes[3, 2].plot(step, position[:, 2], zorder=1, label='pz')
-    axes[3, 2].set_xlabel('Time/s', fontsize=14)
-    axes[3, 2].set_ylabel('Pz', fontsize=14)
+    axes[3, 2].set_xlabel('Time (s)', fontsize=14)
+    axes[3, 2].set_ylabel('Pz (m)', fontsize=14)
     axes[3, 2].legend(fontsize=12)
 
     ############################    Acceleration Plot    ############################
@@ -283,8 +283,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     axes2.plot(step, ha_action[:, 0], zorder=2, label='ha_vx')
     axes2.plot(step, min_ddq[:, 0], zorder=1, label='ddq_min')
     axes2.plot(step, max_ddq[:, 0], zorder=1, label='ddq_max')
-    axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('ddq vx', fontsize=label_font2)
+    axes2.set_xlabel('Time (s)', fontsize=label_font2)
+    axes2.set_ylabel('ddq vx (m/s^2)', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
     #
     axes2 = fig2.add_subplot(gs[0, 1])
@@ -295,8 +295,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     # axes2[0, 1].plot(step, total_ddq[:, 1], zorder=2, label='total_vy')
     axes2.plot(step, min_ddq[:, 1], zorder=1, label='ddq_min')
     axes2.plot(step, max_ddq[:, 1], zorder=1, label='ddq_max')
-    axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('ddq wy', fontsize=label_font2)
+    axes2.set_xlabel('Time (s)', fontsize=label_font2)
+    axes2.set_ylabel('ddq vy (m/s^2)', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
     #
     axes2 = fig2.add_subplot(gs[0, 2])
@@ -307,8 +307,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     # axes2[0, 2].plot(step, total_ddq[:, 2], zorder=1, label='total_vz')
     axes2.plot(step, min_ddq[:, 2], zorder=1, label='ddq_min')
     axes2.plot(step, max_ddq[:, 2], zorder=1, label='ddq_max')
-    axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('ddq vz', fontsize=label_font2)
+    axes2.set_xlabel('Time (s)', fontsize=label_font2)
+    axes2.set_ylabel('ddq vz (m/s^2)', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
     #
     axes2 = fig2.add_subplot(gs[1, 0])
@@ -319,8 +319,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     # axes2[1, 0].plot(step, total_ddq[:, 3], zorder=1, label='total_wx')
     axes2.plot(step, min_ddq[:, 3], zorder=1, label='ddq_min')
     axes2.plot(step, max_ddq[:, 3], zorder=1, label='ddq_max')
-    axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('ddq wx', fontsize=label_font2)
+    axes2.set_xlabel('Time (s)', fontsize=label_font2)
+    axes2.set_ylabel('ddq wx (rad/s^2)', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
     #
     axes2 = fig2.add_subplot(gs[1, 1])
@@ -331,8 +331,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     # axes2[1, 1].plot(step, total_ddq[:, 4], zorder=1, label='total_wy')
     axes2.plot(step, min_ddq[:, 4], zorder=1, label='ddq_min')
     axes2.plot(step, max_ddq[:, 4], zorder=1, label='ddq_max')
-    axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('ddq wy', fontsize=label_font2)
+    axes2.set_xlabel('Time (s)', fontsize=label_font2)
+    axes2.set_ylabel('ddq wy (rad/s^2)', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
     #
     axes2 = fig2.add_subplot(gs[1, 2])
@@ -343,8 +343,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     # axes2[1, 2].plot(step, total_ddq[:, 5], zorder=1, label='total_wz')
     axes2.plot(step, min_ddq[:, 5], zorder=1, label='ddq_min')
     axes2.plot(step, max_ddq[:, 5], zorder=1, label='ddq_max')
-    axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('ddq wz', fontsize=label_font2)
+    axes2.set_xlabel('Time (s)', fontsize=label_font2)
+    axes2.set_ylabel('ddq wz (rad/s^2)', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
 
     axes2 = fig2.add_subplot(gs[2, :])
@@ -359,8 +359,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     axes2.autoscale()
 
     # axes2.plot(step, lyapunov_energy[:], zorder=1, label='lyapunov_energy')
-    axes2.set_xlabel('Time/s', fontsize=label_font2)
-    axes2.set_ylabel('lyapunov_energy', fontsize=label_font2)
+    axes2.set_xlabel('Time (s)', fontsize=label_font2)
+    axes2.set_ylabel('Lyapunov Energy', fontsize=label_font2)
     axes2.legend(fontsize=legend_font2)
 
     ############################    Motor Statistics    ############################
@@ -384,8 +384,8 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     axes3.plot(step, ha_action[:, 0], zorder=2, label='ha_vx')
     # axes3.plot(step, min_ddq[:, 0], zorder=1, label='ddq_min')
     # axes3.plot(step, max_ddq[:, 0], zorder=1, label='ddq_max')
-    axes3.set_xlabel('Time/s', fontsize=label_font2)
-    axes3.set_ylabel('motor power', fontsize=label_font2)
+    axes3.set_xlabel('Time (s)', fontsize=label_font2)
+    axes3.set_ylabel('Motor Power (N·m)', fontsize=label_font2)
     axes3.legend(fontsize=legend_font2)
 
     # Energy consumption
@@ -396,25 +396,25 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
     axes3.plot(step, ha_action[:, 0], zorder=2, label='ha_vx')
     # axes3.plot(step, min_ddq[:, 0], zorder=1, label='ddq_min')
     # axes3.plot(step, max_ddq[:, 0], zorder=1, label='ddq_max')
-    axes3.set_xlabel('Time/s', fontsize=label_font2)
-    axes3.set_ylabel('motor energy', fontsize=label_font2)
+    axes3.set_xlabel('Time (s)', fontsize=label_font2)
+    axes3.set_ylabel('Motor Energy Consumption (J)', fontsize=label_font2)
     axes3.legend(fontsize=legend_font2)
+
+    sum_energy = np.trapz(motor_power.squeeze(), timestamp.squeeze())
+    print(f"Average Motor Power (Unit: Watt/N·m): {motor_power.mean()}")
+    print(f"Sum of Consumed Motor Energy (Unit: J): {sum_energy}")
 
     fig.subplots_adjust(left=0.06, right=0.943, top=0.95, bottom=0.076, wspace=0.16, hspace=0.19)
     fig2.subplots_adjust(left=0.052, right=0.986, top=0.968, bottom=0.06, wspace=0.145, hspace=0.179)
     # plt.tight_layout()
     plt.show()
 
-    sum_energy = np.trapz(motor_power.squeeze(), timestamp.squeeze())
-    print(f"Average Motor Power (Unit: Watt/N·m): {motor_power.mean()}")
-    print(f"Sum of Consumed Motor Energy (Unit: J): {sum_energy}")
     # Save to csv file
     if save2csv:
         # Data collections to csv file
         data = {
             'Timestamp': timestamp.squeeze(),
             'ActionMode': action_mode.squeeze(),
-            'Lyapunov_energy': lyapunov_energy.squeeze(),
             'px': position[:, 0].squeeze(),
             'py': position[:, 1].squeeze(),
             'pz': position[:, 2].squeeze(),
@@ -439,6 +439,9 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
             'wx_ref': angular_vel_ref[:, 0].squeeze(),
             'wy_ref': angular_vel_ref[:, 1].squeeze(),
             'wz_ref': angular_vel_ref[:, 2].squeeze(),
+            'lyapunov_energy': lyapunov_energy.squeeze(),
+            'motor_power': motor_power.squeeze(),
+            'motor_energy_consumption': stepwise_energy.squeeze(),
         }
 
         df = pd.DataFrame(data)
@@ -464,7 +467,9 @@ if __name__ == '__main__':
     fp = f"{dir_name}/{file_list[file_order]}"
 
     # Self-defined file
-    fp = f"logs/eval/runtime-learning.pkl"
+    # fp = f"logs/eval/uneven_rtl_suboptimal.pkl"
+    # fp = f"logs/eval/runtime-learning.pkl"
+    # fp = f"logs/eval/uneven_only_teacher_larger_chi.pkl"
 
     # Plot trajectory and/or save to csv file
     plot_trajectory(filepath=f"{fp}", save2csv=True)

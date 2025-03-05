@@ -102,10 +102,10 @@ class OffPolicyRunner:
                     # import pdb
                     # pdb.set_trace()
 
-                    # if torch.any(new_ids):
-                    #     ep_step = ep_infos[0]["ep_step"][new_ids].cpu().numpy().tolist()
-                    #     ep_reward_avg = ep_reward_sum / ep_step
-                    #     ep_reward_sum = 0
+                    if torch.any(new_ids):
+                        ep_step = ep_infos[0]["ep_step"][new_ids].cpu().numpy().tolist()
+                        ep_reward_avg = ep_reward_sum / ep_step
+                        ep_reward_sum = 0
 
 
                 stop = time.time()

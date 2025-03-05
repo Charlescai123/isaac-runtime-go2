@@ -80,20 +80,23 @@ def main(argv):
 
     # Reconfigure for plotting
     with config.unlocked():
-        config.terminate_on_destination_reach = False
+        config.environment.terminate_on_destination_reach = True        # For video recording
 
-        config.environment.gamma = 0.3
+        # config.environment.gamma = 0.0001
         config.environment.desired_vx = 0.4
-        config.environment.clip_wz = [-0.7, 0.7]
+        # config.environment.swing_foot_height = 0.11
+        # config.environment.clip_wz = [-0.7, 0.7]
         # to_torch([-30, -30, -10, -20, -20, -20], device=self._device),
         # to_torch([30, 30, 30, 20, 20, 20], device=self._device))
-        config.environment.action_lb = np.array([-5., -10., -5., -5., -5., -4.])
-        config.environment.action_ub = np.array([10., 10., 5., 5., 5., 4.])
+        # config.environment.action_lb = np.array([-5., -10., -5., -5., -5., -4.])
+        # config.environment.action_ub = np.array([10., 10., 5., 5., 5., 4.])
+        # config.environment.action_lb = np.array([-10., -10., -10., -10., -10., -10.])
+        # config.environment.action_ub = np.array([10., 10., 10., 10., 10., 10.])
 
-        config.environment.base_position_kp = np.array([0., 0., 50.])
-        config.environment.base_position_kd = np.array([10., 10., 10.])
-        config.environment.base_orientation_kp = np.array([50., 50., 0.])
-        config.environment.base_orientation_kd = np.array([10., 10., 10.])
+        # config.environment.base_position_kp = np.array([0., 0., 50.])
+        # config.environment.base_position_kd = np.array([10., 10., 10.])
+        # config.environment.base_orientation_kp = np.array([50., 50., 0.])
+        # config.environment.base_orientation_kd = np.array([10., 10., 10.])
 
         config.environment.terminate_on_dense_body_contact = False
         config.environment.terminate_on_height = 0.15
@@ -101,10 +104,10 @@ def main(argv):
     # HA-Teacher module
     if FLAGS.enable_ha_teacher:
         with config.unlocked():
-            config.environment.safety_subset = [0.1, 0.28, 0.28, np.inf, 0.33, np.inf, np.inf, np.inf, np.inf, 1.]
+            # config.environment.safety_subset = [0.1, 0.28, 0.28, np.inf, 0.33, np.inf, np.inf, np.inf, np.inf, 1.]
             config.environment.ha_teacher.enable = True
-            config.environment.ha_teacher.chi = 0.15
-            config.environment.ha_teacher.tau = 10
+            config.environment.ha_teacher.chi = 0.2
+            config.environment.ha_teacher.tau = 20
 
     env = config.env_class(num_envs=FLAGS.num_envs,
                            device=device,
@@ -201,7 +204,7 @@ def main(argv):
             # if steps_count == 1000 or done.any():
                 print(info["episode"])
                 done_flag = True
-                # break
+                break
 
             if done_flag:
                 if wait_step < wait_buffer:
@@ -217,6 +220,7 @@ def main(argv):
             print(f"steps_count: {steps_count}")
             e = time.time()
             print(f"step duration: {e - s}")
+            print(f"wait_step: {wait_step}")
 
     print(f"Total reward: {total_reward}")
     print(f"Time elapsed: {time.time() - start_time}")

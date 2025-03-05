@@ -75,7 +75,6 @@ class DDPG(AbstractDPG):
         return self
 
     def act(self, obs, critic_obs):
-
         return self.nn_act(obs).detach()
 
     def to(self, device: str) -> DDPG:

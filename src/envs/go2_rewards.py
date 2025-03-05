@@ -1,3 +1,5 @@
+import math
+
 import torch
 
 from src.physical_design import MATRIX_P
@@ -77,6 +79,7 @@ class Go2Rewards:
         return self._robot.projected_gravity[:, 2]
 
     def alive_reward(self):
+        """Reward for keeping alive"""
         return torch.ones(self._num_envs, device=self._device)
 
     def height_reward(self):
@@ -221,20 +224,37 @@ class Go2Rewards:
 
         return sum_reward.squeeze(dim=-1)
 
-    def distance_to_goal_reward(self):
-        """Get Goal Distance Reward
+    def distance_to_wp_reward(self):
+        """Get Waypoint Distance Reward
             curr_pos: 2d vector
             goal: 2d vector"""
 
-        distance = self._env.goal_distance
+        # distance = self._env.goal_distance
+        # d_min = 0.0
+        # d_max = 10.0
+        # normalized_distance = (distance - d_min) / (d_max - d_min)
 
-        d_min = 0.0
-        d_max = 10.0
-        normalized_distance = (distance - d_min) / (d_max - d_min)
+        # return -normalized_distance
 
-        return -normalized_distance
+        curr_distance = self._env.goal_distance
+        last_distance = self._env.last_goal_distance
 
-    def reach_goal_reward(self):
+        alpha1 = 10
+        step_rew = curr_distance - last_distance
+
+        alpha2 = 0
+        wp_prog_rew = 0
+        for i in range(len(self._env.sub_goal_reach_time)):
+            wp_prog_rew += self.wp_progress_reward(self._env.sub_goal_reach_time[i])
+
+        return alpha1 * step_rew + alpha2 * wp_prog_rew
+
+    def wp_progress_reward(self, step_cnt):
+        """Reward for the reached waypoint progress"""
+        time_decay_factor = 5e-2
+        return math.exp(-time_decay_factor * step_cnt)
+
+    def reach_wp_reward(self):
         """Reward for reaching the waypoint"""
         return int(self._env.sub_goal_reach_flag)
 
@@ -243,6 +263,6 @@ class Go2Rewards:
         decay_factor = 1e-3
         return -torch.sum(self._env.episode_length_buf * decay_factor)
 
-    def reach_destination_reward(self):
-        """The reward for reaching the destination"""
+    def reach_goal_reward(self):
+        """The reward for reaching the goal (destination)"""
         return int(not self._env.planner.planning_flag)

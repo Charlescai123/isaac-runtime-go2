@@ -17,14 +17,14 @@ def get_training_config():
 
     # Replay buffer
     alg_config.action_noise_scale = 0.1
-    alg_config.init_noise_std = 0.1
+    alg_config.init_noise_std = 0.02
     alg_config.storage_initial_size = 0
     alg_config.storage_size = 1e5
     alg_config.batch_count = 1
     alg_config.batch_size = 4096
 
     # Actor
-    alg_config.actor_lr = 1e-4
+    alg_config.actor_lr = 1e-3
     alg_config.actor_activations = ["elu", "elu", "elu", "tanh"]
     alg_config.actor_hidden_dims = [512, 256, 128]
     alg_config.actor_init_gain = 0.5
@@ -60,7 +60,7 @@ def get_training_config():
     runner_config.num_steps_per_env = 100
     runner_config.save_interval = 50
     runner_config.experiment_name = "train_ddpg"
-    runner_config.max_iterations = 5000
+    runner_config.max_iterations = 15000
 
     # Integrate
     config.algorithm = alg_config

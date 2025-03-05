@@ -18,11 +18,11 @@ def get_env_config():
     config.observation_ub = np.array([10., 3.14, 0.6, 3.14, 3.14, 3.14, 1., 1., 1., 3.14, 3.14, 3.14])
 
     # Action: [acc_vx, acc_vy, acc_vz, acc_wx, acc_wy, acc_wz]
-    config.action_lb = np.array([-5., -10., -5., -5., -5., -4.])
-    config.action_ub = np.array([10., 10., 5., 5., 5., 4.])
+    config.action_lb = np.array([-10., -10., -10., -20., -20., -20.])
+    config.action_ub = np.array([10., 10., 10., 20., 20., 20.])
 
     # DRL-based gamma (0 < gamma < 1)
-    config.gamma = 0.3
+    config.gamma = 0.35
     config.obs_dim = config.observation_lb.shape[0]
     config.act_dim = config.action_lb.shape[0]
     config.episode_length_s = 120.
@@ -33,12 +33,12 @@ def get_env_config():
     config.use_yaw_feedback = False
 
     # Safety subset (height, roll, pitch, yaw, vx, vy, vz, wx, wy, wz)
-    safety_subset = [0.1, 0.25, 0.25, np.inf, 0.3, np.inf, np.inf, np.inf, np.inf, 1.]
+    safety_subset = [0.12, 0.35, 0.35, np.inf, 0.35, np.inf, np.inf, np.inf, np.inf, 1.]
 
     # HA-Teacher
     ha_teacher_config = ConfigDict()
-    ha_teacher_config.chi = 0.15
-    ha_teacher_config.tau = 20
+    ha_teacher_config.chi = 0.2
+    ha_teacher_config.tau = 10
     ha_teacher_config.enable = False
     ha_teacher_config.correct = True
     ha_teacher_config.epsilon = 1
@@ -104,20 +104,21 @@ def get_env_config():
         # 'stepping_freq': 0.008,
         # 'com_distance_to_goal_squared': 0.016,
         # 'jerky_action': -1,
-        'fall_down': 1000,
+        # 'alive': 10,
+        'fall_down': 10000,
         # 'forward_speed': 0.1,
         # 'lin_vel_z': -2,
         'body_contact': 100,
-        'energy_consumption': 0.1,
+        'energy_consumption': 0.05,
         'lin_vel_tracking': 5,
         'ang_vel_tracking': 5,
-        'orientation_tracking': 10,
+        'orientation_tracking': 80,
         'height_tracking': 50,
-        'lyapunov': 40,
-        'reach_time': 10,
-        'distance_to_goal': 50,
-        'reach_goal': 100,
-        'reach_destination': 1000,
+        'lyapunov': 100,
+        # 'reach_time': 10,
+        'distance_to_wp': 50,      # Distance to waypoint
+        'reach_wp': 100,            # Reach waypoint
+        'reach_goal': 500,         # Reach destination
         # 'com_height': 0.01,
     }
     reward_config.only_positive_rewards = True  # if true negative total rewards are clipped at zero (avoids early termination problems)

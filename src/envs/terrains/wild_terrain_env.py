@@ -39,7 +39,7 @@ class WildTerrainEnv:
         # Simulate unnecessary terrain dynamics
         # self.simulate_irrelevant_dynamics()
 
-    def simulate_irrelevant_dynamics(self, step_cnt=2000):
+    def simulate_irrelevant_dynamics(self, step_cnt=2500):
         """Simulate and bypass irrelevant terrain dynamics initially to prevent unwanted motion in subsequent robot
         interactions."""
         self._gym.prepare_sim(self._sim)
@@ -89,11 +89,11 @@ class WildTerrainEnv:
         self.load_mountain_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
 
         # Snow Rocks
-        # self.load_snow_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
+        self.load_snow_rocks(env=env, offset_x=offset_x, offset_y=offset_y)
 
         # Random stones (movable stones)
-        self.load_random_snowstones_in_a_region(env=env, scene_offset_x=offset_x, width=6, length=10, stone_nums=480,
-                                                scale_size=(0.15, 0.18), reverse=reverse, random_seed=9)
+        self.load_random_snowstones_in_a_region(env=env, scene_offset_x=offset_x, width=6, length=10, stone_nums=460,
+                                                scale_size=(0.12, 0.18), reverse=reverse, random_seed=9)
         # Random stones (static stones)
         self.load_random_cobblestones_in_a_region(env=env, scene_offset_x=offset_x, stone_nums=100, reverse=reverse)
         # self.load_random_cobblestones_in_a_region(env=env, scene_offset_x=offset_x + 2, scene_offset_y=-3,
