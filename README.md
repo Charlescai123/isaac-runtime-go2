@@ -1,4 +1,4 @@
-# Isaac-PhyRL-Go2
+# Isaac-Runtime-Go2
 
 ![PyTorch](https://img.shields.io/badge/PyTorch-3.2.6-red?logo=pytorch)
 ![Tensorflow](https://img.shields.io/badge/Tensorflow-2.11.0-orange?logo=tensorflow)
@@ -8,18 +8,17 @@
 
 ---
 
-This repo deploys the **Runtime Learning Machine** on Quadruped-Go2 robot to within a sim2sim environment (Pybullet to
-IsaacGym)
+This repo implements the **Runtime Learning Framework** on the Unitree-Go2 robot for the wild environments in Nivida IsaacGym.
 
 ## To Do ##
-* [x] Add BEV map to the repo
-* [x] Fast Marching Method (FMM) implementation
-* [ ] Incorporate more challenging scenarios
+<!-- * [x] Add BEV map to the repo -->
+<!-- * [x] Fast Marching Method (FMM) implementation -->
+* [-] Incorporate more challenging scenarios
   * [x] Dense forests (sandy terrain, trees)
   * [ ] inclined staircases, and rainy conditions
 * [ ] Go2 real robot deployment
   * [ ] Gazebo real-time testing
-  * [ ] ROS/ROS2 encapsulation
+  * [ ] ROS/ROS2 integration
 * [ ] Restructure the code as FSM and add teleoperation (optional)
 * [ ] Migration to Isaac-Lab
 
@@ -34,7 +33,7 @@ IsaacGym)
 
 1. Clone this repository:
 ```bash
-git clone git@github.com:Charlescai123/isaac-phyrl-go2.git
+git clone git@github.com:Charlescai123/isaac-runtime-go2.git
 ```
 
 2. Create the conda environment with:
@@ -58,6 +57,14 @@ cd extern/rsl_rl && pip install -e .
 * ```bash
   cd examples && python 1080_balls_of_solitude.py
   ```
+
+## Navigation
+<p align="center">
+  <img src="./docs/bev_map.png" height="240" alt="scene"/> 
+  <img src="./docs/occupancy_map.png" height="240" alt="scene"/> 
+  <img src="./docs/costmap.png" height="240" alt="scene"/> 
+ <br><b>Fig 1. Map Generation Pipeline (left to right -- BEV Map, Occupancy Map, Cost Map)</b>
+</p>
 
 ## Sim-to-Sim
 
@@ -85,12 +92,15 @@ This experiment highlights the instability and safety issues of the pretrained p
 even
 with the employment of domain randomization.
 
-- ### Runtime Learning Machine
+- ### Runtime Learning Framework
 
 ---
 
 The **Runtime Learning Machine** is designed to ensure real-time responsiveness in safety-critical systems, effectively
 handling unforeseen incidents arising from unknown environments.
+
+<p align="center">
+ <img src="./docs/scene.png" height="440" alt="rlm"/> 
 
 - **Safety Assurance:**
 
@@ -139,4 +149,5 @@ Special thanks to the contributions from these repos:
 
 - [rsl\_rl](https://github.com/leggedrobotics/rsl_rl.git): Template for standard Reinforcement Learning algorithms.
 - [legged\_gym](https://github.com/leggedrobotics/legged_gym): Collection of simulation environments for legged robots.
-- [cajun](https://github.com/yxyang/cajun): Some baseline code for MPC-based control of legged robots.
+- [cajun](https://github.com/yxyang/cajun): Some baseline code for model-based control of legged robots.
+- [navigation-locomotion](https://github.com/MarkFzp/navigation-locomotion): Fast-Marching-Method and Motion Planning
