@@ -72,9 +72,9 @@ cd extern/rsl_rl && pip install -e .
 [//]: # (</p>)
 
 
-| BEV Map                          | Occupancy Map                          | Cost Map                         |
-|----------------------------------|----------------------------------------|----------------------------------|
-| <img src="./docs/bev_map.png" height="325"/> | <img src="./docs/occupancy_map.png" height="325"/> | <img src="./docs/costmap.png" height="325"/> |
+| BEV Map                                      | Occupancy Map                                      | Cost Map                                     |
+|----------------------------------------------|----------------------------------------------------|----------------------------------------------|
+| <img src="./docs/bev_map.png" height="330"/> | <img src="./docs/occupancy_map.png" height="330"/> | <img src="./docs/costmap.png" height="330"/> |
 
 
 ## Sim-to-Sim
