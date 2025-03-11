@@ -8,16 +8,18 @@
 
 ---
 
-This repo implements the **Runtime Learning Framework** on the Unitree-Go2 robot for the wild environments in Nivida IsaacGym.
-
+This repo implements the **Runtime Learning Framework** on the Unitree-Go2 robot for the wild environments in Nivida
+IsaacGym. In this framework, a closed-loop system is established for the quadruped robot by incorporating the *Sensing*,
+*Navigation/Planning* and *Locomotion Control* module.
 <p align="center">
  <img src="./docs/runtime-learning.png" height="460" alt="scene"/> 
- <br><b>Fig 1. A Sim-to-Sim policy transfer in unforeseen Environment on Quadruped Go2</b>
+ <br><b>Fig 1. Runtime Learning Framework -- A Close-loop System for the Quadruped Robot</b>
 </p>
 
 ## User Guide
 
 ### ⚙️ Dependencies
+
 * *Python - 3.8 or above*
 * *PyTorch - 1.10.0*
 * *Isaac Gym - Preview 4*
@@ -25,39 +27,55 @@ This repo implements the **Runtime Learning Framework** on the Unitree-Go2 robot
 ### 🔨 Setup
 
 1. Clone this repository:
+
 ```bash
 git clone git@github.com:Charlescai123/isaac-runtime-go2.git
 ```
 
 2. Create the conda environment with:
+
 ```bash
 conda env create -f environment.yml
 ```
 
 3. Activate conda environment and Install `rsl_rl` lib:
+
 ```bash
 conda activate runtime
 cd extern/rsl_rl && pip install -e .
 ```
 
 4. Download and install IsaacGym:
+
 * Download [IsaacGym](https://developer.nvidia.com/isaac-gym) and extract the downloaded file to the root folder.
 * navigate to the `isaacgym/python` folder and install it with commands:
 * ```bash
   cd isaacgym/python && pip install -e .
   ```
-* Test the given example (ignore the error about GPU not being utilized if any): 
+* Test the given example (ignore the error about GPU not being utilized if any):
 * ```bash
   cd examples && python 1080_balls_of_solitude.py
   ```
 
 ## 📍 Navigation
-<p align="center">
-  <img src="./docs/bev_map.png" height="320" alt="scene"/> 
-  <img src="./docs/occupancy_map.png" height="320" alt="scene"/> 
-  <img src="./docs/costmap.png" height="320" alt="scene"/> 
- <br><b>Fig 1. Map Generation Pipeline (left to right -- BEV Map, Occupancy Map, Cost Map)</b>
-</p>
+
+[//]: # (<p align="center">)
+
+[//]: # (  <img src="./docs/bev_map.png" height="325" alt="scene"/> )
+
+[//]: # (  <img src="./docs/occupancy_map.png" height="325" alt="scene"/> )
+
+[//]: # (  <img src="./docs/costmap.png" height="325" alt="scene"/> )
+
+[//]: # ( <br><b>Fig 1. Map Generation Pipeline &#40;left to right -- BEV Map, Occupancy Map, Cost Map&#41;</b>)
+
+[//]: # (</p>)
+
+
+| BEV Map                          | Occupancy Map                          | Cost Map                         |
+|----------------------------------|----------------------------------------|----------------------------------|
+| <img src="./docs/bev_map.png" height="325"/> | <img src="./docs/occupancy_map.png" height="325"/> | <img src="./docs/costmap.png" height="325"/> |
+
 
 ## Sim-to-Sim
 
@@ -129,14 +147,16 @@ python -m src.scripts.ddpg.train --use_gpu=True --enable_ha_teacher=True
 ```
 
 ## ⏳ To Do ##
+
 <!-- * [x] Add BEV map to the repo -->
 <!-- * [x] Fast Marching Method (FMM) implementation -->
+
 * [-] Incorporate more challenging scenarios
-  * [x] Dense forests (sandy terrain, trees)
-  * [ ] inclined staircases, and rainy conditions
+    * [x] Dense forests (sandy terrain, trees)
+    * [ ] inclined staircases, and rainy conditions
 * [ ] Go2 real robot deployment
-  * [ ] Gazebo real-time testing
-  * [ ] ROS/ROS2 integration
+    * [ ] Gazebo real-time testing
+    * [ ] ROS/ROS2 integration
 * [ ] Restructure the code as FSM and add teleoperation (optional)
 * [ ] Migration to Isaac-Lab
 
@@ -151,7 +171,9 @@ python -m src.scripts.ddpg.train --use_gpu=True --enable_ha_teacher=True
 ---
 
 ## 📝 Citation
+
 Please star or cite below papers if you find this repo helpful 🙏
+
 ```
 @misc{cai2025runtimelearningquadrupedrobots,
       title={Runtime Learning of Quadruped Robots in Wild Environments}, 
@@ -163,6 +185,7 @@ Please star or cite below papers if you find this repo helpful 🙏
       url={https://arxiv.org/abs/2503.04794}, 
 }
 ```
+
 ```
 @misc{cao2024simplexenabledsafecontinuallearning,
       title={Simplex-enabled Safe Continual Learning Machine}, 
