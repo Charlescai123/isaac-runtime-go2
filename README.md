@@ -10,6 +10,11 @@
 
 This repo implements the **Runtime Learning Framework** on the Unitree-Go2 robot for the wild environments in Nivida IsaacGym.
 
+<p align="center">
+ <img src="./docs/runtime-learning.png" height="460" alt="scene"/> 
+ <br><b>Fig 1. A Sim-to-Sim policy transfer in unforeseen Environment on Quadruped Go2</b>
+</p>
+
 ## User Guide
 
 ### ⚙️ Dependencies
@@ -48,9 +53,9 @@ cd extern/rsl_rl && pip install -e .
 
 ## 📍 Navigation
 <p align="center">
-  <img src="./docs/bev_map.png" height="240" alt="scene"/> 
-  <img src="./docs/occupancy_map.png" height="240" alt="scene"/> 
-  <img src="./docs/costmap.png" height="240" alt="scene"/> 
+  <img src="./docs/bev_map.png" height="360" alt="scene"/> 
+  <img src="./docs/occupancy_map.png" height="360" alt="scene"/> 
+  <img src="./docs/costmap.png" height="360" alt="scene"/> 
  <br><b>Fig 1. Map Generation Pipeline (left to right -- BEV Map, Occupancy Map, Cost Map)</b>
 </p>
 
@@ -62,7 +67,7 @@ We deploy a *sim-to-sim* policy (Phy-DRL) trained in the PyBullet environment on
 IsaacGym for the Go2 robot.
 
 <p align="center">
- <img src="./docs/scene.png" height="460" alt="scene"/> 
+ <img src="./docs/scene.png" height="540" alt="scene"/> 
  <br><b>Fig 1. A Sim-to-Sim policy transfer in unforeseen Environment on Quadruped Go2</b>
 </p>
 
