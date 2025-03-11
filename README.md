@@ -53,9 +53,9 @@ cd extern/rsl_rl && pip install -e .
 
 ## 📍 Navigation
 <p align="center">
-  <img src="./docs/bev_map.png" height="360" alt="scene"/> 
-  <img src="./docs/occupancy_map.png" height="360" alt="scene"/> 
-  <img src="./docs/costmap.png" height="360" alt="scene"/> 
+  <img src="./docs/bev_map.png" height="320" alt="scene"/> 
+  <img src="./docs/occupancy_map.png" height="320" alt="scene"/> 
+  <img src="./docs/costmap.png" height="320" alt="scene"/> 
  <br><b>Fig 1. Map Generation Pipeline (left to right -- BEV Map, Occupancy Map, Cost Map)</b>
 </p>
 
