@@ -58,10 +58,6 @@ def get_env_config():
     config.base_position_kd = np.array([5., 5., 5.]) * 2
     config.base_orientation_kp = np.array([25., 25., 0.]) * 2
     config.base_orientation_kd = np.array([5., 5., 5.]) * 2
-    # config.base_position_kp = np.array([0., 0., 40.])
-    # config.base_position_kd = np.array([5., 5., 5.])
-    # config.base_orientation_kp = np.array([40., 40., 0.])
-    # config.base_orientation_kd = np.array([5., 5., 5.])
     config.qp_foot_friction_coef = 0.7
     config.qp_weight_ddq = np.diag([1., 1., 10., 10., 10., 1.])
     config.qp_body_inertia = np.array([[0.1585, 0.0001, -0.0155],

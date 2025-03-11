@@ -7,7 +7,7 @@ import numpy as np
 import pybullet as p
 from filterpy.kalman import KalmanFilter
 
-from src.envs.robots.utils.moving_window_filter import MovingWindowFilter
+from src.envs.robots.modules.utils.moving_window_filter import MovingWindowFilter
 
 _DEFAULT_WINDOW_SIZE = 1
 _ANGULAR_VELOCITY_FILTER_WINDOW_SIZE = 1

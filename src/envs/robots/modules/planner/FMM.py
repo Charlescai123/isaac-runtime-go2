@@ -130,19 +130,8 @@ class FMMPlanner:
 
         next_pos = np.stack([next_pos] * len(self.small_fovs), axis=2)
 
-        # print(f"fovs_w: {fovs_w}")
-        # print(f"fovs_w_1d: {fovs_w_1d}")
-        # print(f"next_pos: {next_pos}")
-        # print(f"next_vel: {next_vel}")
-        # print(f"local_vel_angle: {local_vel_angle}")
-
         next_pos_l = next_pos.reshape(-1, 2)
         next_vel_l = next_vel.reshape(-1, 2)
-
-        # print(f"pos: {pos}")
-        # print(f"yaw: {yaw}")
-        # print(f"lin_speed: {lin_speed}")
-        # time.sleep(5)
 
         return next_pos_l, next_vel_l, stop
 
@@ -164,13 +153,10 @@ class FMMPlanner:
     def find_argmin_traj(self, pos_trajs):
         T = pos_trajs.shape[1]
         flat_pos_trajs = pos_trajs.reshape(-1, 2)
-        # print(f"flag_pos_trajs: {flat_pos_trajs}")
         flat_pos_trajs = flat_pos_trajs[::-1]
         fmm_values = self.get_fmm_value(flat_pos_trajs)
         traj_cost = fmm_values.reshape(-1, T)
         argmin_idx = np.argmin(np.sum(traj_cost, axis=-1))
-        # print(f"fmm_values: {fmm_values}")
-        # print(f"argmin_idx: {argmin_idx}")
 
         return argmin_idx
 

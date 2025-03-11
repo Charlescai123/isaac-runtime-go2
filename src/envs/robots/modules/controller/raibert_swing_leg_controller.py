@@ -121,14 +121,6 @@ def compute_desired_foot_positions(
                                                start_pos=phase_switch_foot_positions,
                                                mid_pos=mid_position,
                                                end_pos=land_position)
-    # print(f"Land position: {land_position}")
-    # print(f"Foot position: {foot_position}")
-    # time.sleep(123)
-    # ans = input("Any Key...")
-    # if ans in ["Y", "y"]:
-    #   import pdb
-    #   pdb.set_trace()
-
     return foot_position
 
 
@@ -199,7 +191,4 @@ class RaibertSwingLegController:
             self._gait_generator.normalized_phase,
             self._phase_switch_foot_positions,
         )
-
-        # print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!desired_foot_pos: {desired_foot_pos}")
-
         return desired_foot_pos

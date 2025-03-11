@@ -7,7 +7,7 @@ import torch
 from qpth.qp import QPFunction, QPSolvers
 
 from src.envs.robots.motors import MotorCommand
-from src.envs.robots.utils.rotation_utils import quat_to_rot_mat
+from src.envs.robots.modules.utils.rotation_utils import quat_to_rot_mat
 
 
 @torch.jit.script
@@ -331,11 +331,6 @@ class QPTorqueOptimizer:
         self._inv_mass = torch.eye(3, device=self._device) / body_mass
         self._inv_inertia = torch.linalg.inv(to_torch(body_inertia, device=self._device))
 
-        # print(f"self._base_position_kp: {self._base_position_kp}")
-        # print(f"self._base_position_kd: {self._base_position_kd}")
-        # print(f"self._base_orientation_kp: {self._base_orientation_kp}")
-        # print(f"self._base_orientation_kd: {self._base_orientation_kd}")
-
     def _solve_joint_torques(self, foot_contact_state, desired_com_ddq):
         """Solves centroidal QP to find desired joint torques."""
         self._mass_mat = construct_mass_mat(
@@ -589,12 +584,5 @@ class QPTorqueOptimizer:
 
         ang_vel_error = self.desired_angular_velocity - torch.matmul(
             base_rot_mat, self._robot.base_angular_velocity_body_frame[:, :, None])[:, :, 0]
-
-        # print(f"lin_pos_error: {lin_pos_error}")
-        # print(f"ang_pos_error: {ang_pos_error}")
-        # print(f"lin_vel_error: {lin_vel_error}")
-        # print(f"ang_vel_error: {ang_vel_error}")
-        # import pdb
-        # pdb.set_trace()
 
         return torch.hstack((lin_pos_error, ang_pos_error, lin_vel_error, ang_vel_error))

@@ -10,26 +10,14 @@
 
 This repo implements the **Runtime Learning Framework** on the Unitree-Go2 robot for the wild environments in Nivida IsaacGym.
 
-## To Do ##
-<!-- * [x] Add BEV map to the repo -->
-<!-- * [x] Fast Marching Method (FMM) implementation -->
-* [-] Incorporate more challenging scenarios
-  * [x] Dense forests (sandy terrain, trees)
-  * [ ] inclined staircases, and rainy conditions
-* [ ] Go2 real robot deployment
-  * [ ] Gazebo real-time testing
-  * [ ] ROS/ROS2 integration
-* [ ] Restructure the code as FSM and add teleoperation (optional)
-* [ ] Migration to Isaac-Lab
-
 ## User Guide
 
-### Dependencies
-* *Python - 3.8 above*
+### ⚙️ Dependencies
+* *Python - 3.8 or above*
 * *PyTorch - 1.10.0*
 * *Isaac Gym - Preview 4*
 
-### Setup
+### 🔨 Setup
 
 1. Clone this repository:
 ```bash
@@ -43,7 +31,7 @@ conda env create -f environment.yml
 
 3. Activate conda environment and Install `rsl_rl` lib:
 ```bash
-conda activate phyrl-go2
+conda activate runtime
 cd extern/rsl_rl && pip install -e .
 ```
 
@@ -58,7 +46,7 @@ cd extern/rsl_rl && pip install -e .
   cd examples && python 1080_balls_of_solitude.py
   ```
 
-## Navigation
+## 📍 Navigation
 <p align="center">
   <img src="./docs/bev_map.png" height="240" alt="scene"/> 
   <img src="./docs/occupancy_map.png" height="240" alt="scene"/> 
@@ -135,11 +123,52 @@ The **Runtime Learning Machine** facilitates the rapid adaptation of the quadrup
 python -m src.scripts.ddpg.train --use_gpu=True --enable_ha_teacher=True
 ```
 
-## Misc
+## ⏳ To Do ##
+<!-- * [x] Add BEV map to the repo -->
+<!-- * [x] Fast Marching Method (FMM) implementation -->
+* [-] Incorporate more challenging scenarios
+  * [x] Dense forests (sandy terrain, trees)
+  * [ ] inclined staircases, and rainy conditions
+* [ ] Go2 real robot deployment
+  * [ ] Gazebo real-time testing
+  * [ ] ROS/ROS2 integration
+* [ ] Restructure the code as FSM and add teleoperation (optional)
+* [ ] Migration to Isaac-Lab
+
+---
+
+## 🏷️ Misc
 
 ---
 
 - In order to plot the latest saved trajectory, run command `python -m src.utils.plot_trajectory`
+
+---
+
+## 📝 Citation
+Please star or cite below papers if you find this repo helpful 🙏
+```
+@misc{cai2025runtimelearningquadrupedrobots,
+      title={Runtime Learning of Quadruped Robots in Wild Environments}, 
+      author={Yihao Cai and Yanbing Mao and Lui Sha and Hongpeng Cao and Marco Caccamo},
+      year={2025},
+      eprint={2503.04794},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2503.04794}, 
+}
+```
+```
+@misc{cao2024simplexenabledsafecontinuallearning,
+      title={Simplex-enabled Safe Continual Learning Machine}, 
+      author={Hongpeng Cao and Yanbing Mao and Yihao Cai and Lui Sha and Marco Caccamo},
+      year={2024},
+      eprint={2409.05898},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2409.05898}, 
+}
+```
 
 ---
 

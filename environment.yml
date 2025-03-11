@@ -1,4 +1,4 @@
-name: isaac-phyrl-go2
+name: runtime
 channels:
   - pytorch
   - conda-forge

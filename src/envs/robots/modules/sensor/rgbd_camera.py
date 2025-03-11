@@ -13,18 +13,6 @@ from scipy.interpolate import griddata
 from scipy.spatial.transform import Rotation
 
 
-# class BEVMap:
-#     def __init__(self,
-#                  roi_x_range=(45, 55),
-#                  roi_y_range=(-5, 5),
-#                  roi_z_range=(-20, 20),
-#                  resolution=0.015):
-#         self.roi_x_range = roi_x_range  # ROI (x range)
-#         self.roi_y_range = roi_y_range  # ROI (y range)
-#         self.roi_z_range = roi_z_range  # ROI (z range)
-#         self.resolution = resolution  # Resolution
-
-
 class RGBDCamera:
     def __init__(self,
                  robot: Any,
@@ -66,7 +54,7 @@ class RGBDCamera:
         camera_props.enable_tensors = True  # Enable tensor output for the camera
         camera_props.near_plane = 0.1  # Minimum distance
         camera_props.far_plane = 10.0  # Maximum distance
-        camera_horizontal_fov = 87
+        camera_horizontal_fov = 90
         camera_props.horizontal_fov = camera_horizontal_fov
         camera_handle = self._gym.create_camera_sensor(self._env_handle, camera_props)
         camera_pos = [0, 0, 2]
@@ -89,18 +77,7 @@ class RGBDCamera:
         rgba_image = np.frombuffer(color_image, dtype=np.uint8).reshape(self._img_height, self._img_width, 4)
         rgb_image = rgba_image[:, :, :3]
 
-        # depth_image_ = self._gym.get_camera_image_gpu_tensor(self._sim, self._env_handle, self._camera_handle,
-        #                                                      gymapi.IMAGE_DEPTH)
-        # torch_camera_depth_tensor = gymtorch.wrap_tensor(depth_image_)
-        # _depth_img = torch_camera_depth_tensor.clone().cpu().numpy()
-
         self._gym.end_access_image_tensors(self._sim)
-
-        # optical_flow_in_pixels = np.zeros(np.shape(optical_flow_image))
-        # # Horizontal (u)
-        # optical_flow_in_pixels[0, 0] = image_width * (optical_flow_image[0, 0] / 2 ** 15)
-        # # Vertical (v)
-        # optical_flow_in_pixels[0, 1] = image_height * (optical_flow_image[0, 1] / 2 ** 15)
 
         rgb_img = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
         # # _depth_img[np.isinf(_depth_img)] = -256
@@ -194,6 +171,7 @@ class RGBDCamera:
                     as_occupancy=False,
                     occupancy_z_range=(-0.1, 0.2),
                     save_map=False,
+                    cmap="turbo"
                     ):
         """ Creates an 2D birds eye view representation of the point cloud data.
 
@@ -212,24 +190,20 @@ class RGBDCamera:
                              in size.
                 as_occupancy: (boolean)(default=False)
                               To generate an occupancy map or not (0 - obstacle, 1 - free space)
-                reverse_xy: reverse the bev image of x and y-axis or not
-                show_map:   whether to show the generated map
+
+                reverse_xy:  reverse the bev image of x and y-axis or not
+
+                show_map:  whether to show the generated map
+
                 occupancy_z_range: height range of occupancy map
+
                 save_map:   whether to save the generated map
+
+                cmap:  color map -- ["viridis", "gist_earth", "turbo", "terrain", "PRGn_r", "RdBu_r", "RdYlBu_r"]
             """
         # Get point cloud data
         o3d_pcd_wd = self.get_pcd_data(in_world_frame=True, write_ply=False, filename="wd.ply")  # pcd in world frame
         raw_pcd_wd = np.asarray(o3d_pcd_wd.points)
-
-        # camera_tf = self._gym.get_camera_transform(self._sim, self._env_handle, self._camera_handle)
-        # camera_pose = camera_tf.p
-        # camera_quat = np.array([camera_tf.r.x, camera_tf.r.y, camera_tf.r.z, camera_tf.r.w])
-        # rot_matrix = Rotation.from_quat(camera_quat).as_matrix()
-        # print(f"camera_pose: {camera_pose}")
-        # print(f"camera_quat: {camera_quat}")
-        # print(f"rot_matrix: {rot_matrix}")
-
-        # pcd_cam = transform_pcd_world_to_camera(raw_pcd_wd, camera_transform=camera_tf)
 
         # Region of Interest (ROI) Center
         # roi_x_center = camera_pose.x
@@ -290,11 +264,6 @@ class RGBDCamera:
 
             bev_map = occupancy_map
 
-        # Flip the BEV Map
-        # bev_map = bev_map[::-1]
-        # bev_map = np.fliplr(bev_map)
-        # np.save(f"bevmap.npy", bev_map)
-
         # Store BEV Map
         if save_map:
             label_save_folder = '.'
@@ -310,13 +279,12 @@ class RGBDCamera:
         if show_map:
             plt.figure(figsize=(10, 8))
             if reverse_xy:
-                plt.imshow(bev_map, cmap='viridis', origin='lower', extent=[y_min, y_max, x_min, x_max])
-                # plt.imshow(bev_map, cmap='viridis')
+                bev_plot = np.fliplr(bev_map)
+                plt.imshow(bev_plot, cmap=cmap, origin='lower', extent=[y_min, y_max, x_min, x_max])
                 plt.xlabel('Y (m)')
                 plt.ylabel('X (m)')
             else:
-                plt.imshow(bev_map.T, cmap='viridis', origin='lower', extent=[x_min, x_max, y_min, y_max])
-                # plt.imshow(bev_map, cmap='viridis')
+                plt.imshow(bev_map.T, cmap=cmap, origin='lower', extent=[x_min, x_max, y_min, y_max])
                 plt.xlabel('X (m)')
                 plt.ylabel('Y (m)')
             map_name = "Occupancy" if as_occupancy else "BEV"
@@ -360,9 +328,6 @@ class RGBDCamera:
         u = self._img_width - 1
         v = self._img_height - 1
 
-        # u = int(self._img_width / 5 * 4+40)
-        # v = int(self._img_height / 2)
-
         d = _depth[v, u]
         if d <= min_threshold:
             # raise RuntimeError(f"error with the depth camera for the pixel-level origin")
@@ -397,9 +362,6 @@ class RGBDCamera:
 
         # Depth buffer
         _depth = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_DEPTH)
-        # near_plane = 0.1
-        # far_plane = 10.0
-        # _depth = np.clip(_depth, a_min=near_plane, a_max=far_plane)
 
         # Segmentation buffer
         _seg = self._gym.get_camera_image(self._sim, self._env_handle, self._camera_handle, gymapi.IMAGE_SEGMENTATION)

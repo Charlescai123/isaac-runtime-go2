@@ -42,15 +42,6 @@ class Spline:
     def fit_reference(self, start_pts, end_pts, start_grads, end_grads):
         G = np.stack([start_pts, end_pts, start_grads, end_grads], axis=0)  # [4, 2]
         MG = (self.M @ G)[np.newaxis, np.newaxis, :, :]  # [4, 2]
-        # print(f"start_pts: {start_pts}")
-        # print(f"end_pts: {end_pts}")
-        # print(f"start_grads: {start_grads}")
-        # print(f"end_grads: {end_grads}")
-        # print(f"G: {G}")
-        # print(f"MG: {MG}")
-        # print(f"self.T_control: {self.T_control}")
-        # print(f"self.T_dot_control: {self.T_dot_control}")
-        # print(f"self.T_ddot_control: {self.T_ddot_control}")
 
         # in y, x
         # self.T_control @ MG outputs [1, T, 1, 2]
@@ -68,16 +59,5 @@ class Spline:
 
         xs = np.stack([pos[:, 1], pos[:, 0], ang], axis=-1)
         us = np.stack([lin_speed, ang_speed], axis=-1)[: -1]
-
-        # print(f"pos: {pos}")
-        # print(f"xy_dot: {xy_dot}")
-        # print(f"xy_ddot: {xy_ddot}")
-        # print(f"ang: {ang}")
-        # print(f"lin_speed: {lin_speed}")
-        # print(f"y_dot: {y_dot}")
-        # print(f"x_dot: {x_dot}")
-        # print(f"y_ddot: {y_ddot}")
-        # print(f"x_ddot: {x_ddot}")
-        # print(f"ang_speed: {ang_speed}")
 
         return xs, us

@@ -10,7 +10,7 @@ import ml_collections
 import torch
 
 from src.configs.defaults import asset_options as asset_options_config
-from src.envs.robots.utils.rotation_utils import quat_to_rot_mat, get_euler_zyx_from_quaternion
+from src.envs.robots.modules.utils.rotation_utils import quat_to_rot_mat, get_euler_zyx_from_quaternion
 from src.envs.robots.modules.sensor.rgbd_camera import RGBDCamera
 from isaacgym.terrain_utils import *
 

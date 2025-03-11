@@ -8,13 +8,13 @@ from src.envs.terrains.sim_utils import add_ground, add_terrain
 
 ASSET_ROOT = "resources/terrains"
 
-STONE_ASSET = "stone.urdf"
-STOPSIGN_ASSET = "stopsign.urdf"
-TEST_ITEM_ASSET = "tree/deadwood.urdf"
+STONE_ASSET = "objects/stone/stone.urdf"
+STOPSIGN_ASSET = "objects/stopsign/stopsign.urdf"
 SNOW_TREE_ASSET = "tree/snow_tree/snow_tree.urdf"
 OAK_TREE_ASSET = "tree/oak_tree/oak_tree.urdf"
 DEAD_WOOD_ASSET = "tree/deadwood/deadwood.urdf"
-CEMENT_ROAD_ASSET = "plane/cement_road.urdf"
+
+CEMENT_ROAD_ASSET = "plane/cement_road/cement_road.urdf"
 
 
 def random_quaternion():
