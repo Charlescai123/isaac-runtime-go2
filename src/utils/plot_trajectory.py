@@ -451,14 +451,13 @@ def plot_trajectory(filepath: str, outfile_path="data.csv", save2csv=True) -> No
 if __name__ == '__main__':
 
     device = "cuda"
-
-    if len(sys.argv) == 1:
-        folder_name = "eval"
-        file_order = -1
-    else:
-        # folder_name = str(sys.argv[1])
-        folder_name = "eval"
+    folder_name = "eval"
+    file_order = -1
+    if len(sys.argv) == 2:
         file_order = int(sys.argv[1])
+    elif len(sys.argv) == 3:
+        folder_name = str(sys.argv[1])
+        file_order = int(sys.argv[2])
 
     # Find the folder and file according to the order
     dir_name = f"logs/{folder_name}"

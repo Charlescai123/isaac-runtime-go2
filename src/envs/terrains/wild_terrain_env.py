@@ -1,9 +1,9 @@
 import time
 
 from isaacgym import gymapi, gymtorch
-from src.envs.terrains.utils import load_cement_road_asset, load_stone_asset, load_stop_sign_asset, \
+from src.envs.terrains.utils.utils import load_cement_road_asset, load_stone_asset, load_stop_sign_asset, \
     load_snow_tree_asset, load_oak_tree_asset, load_dead_wood_asset
-from src.envs.terrains.utils import random_quaternion, add_uneven_terrains
+from src.envs.terrains.utils.utils import random_quaternion, add_uneven_terrains
 
 import numpy as np
 from typing import Any

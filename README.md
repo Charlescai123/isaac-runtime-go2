@@ -1,4 +1,4 @@
-# Isaac-Runtime-Go2
+# Isaac-Wild-Go2
 
 ![PyTorch](https://img.shields.io/badge/PyTorch-3.2.6-red?logo=pytorch)
 ![Tensorflow](https://img.shields.io/badge/Tensorflow-2.11.0-orange?logo=tensorflow)
@@ -16,7 +16,7 @@ IsaacGym. In this framework, a closed-loop system is established for the quadrup
  <br><b>Fig 1. Runtime Learning Framework -- A Close-loop System for the Quadruped Robot</b>
 </p>
 
-## User Guide
+## 💡 User Guide
 
 ### ⚙️ Dependencies
 
@@ -41,7 +41,7 @@ conda env create -f environment.yml
 3. Activate conda environment and Install `rsl_rl` lib:
 
 ```bash
-conda activate runtime
+conda activate isaac-wild
 cd extern/rsl_rl && pip install -e .
 ```
 
@@ -56,6 +56,28 @@ cd extern/rsl_rl && pip install -e .
 * ```bash
   cd examples && python 1080_balls_of_solitude.py
   ```
+
+5. Build and install the interface to Unitree's SDK:
+
+* First, install the required packages `Boost` and `LCM`:
+
+   ```bash
+   sudo apt install libboost-all-dev liblcm-dev
+   ```
+
+* Then, go to `extern/go2_sdk` and create a build folder:
+   ```bash
+   cd extern/go2_sdk
+   mkdir build && cd build
+   ```
+
+  Now, build the libraries and move them to the main directory by running:
+   ```bash
+   cmake ..
+   make
+   mv go2_interface* ../../..
+   ```
+
 
 ## 📍 Navigation
 

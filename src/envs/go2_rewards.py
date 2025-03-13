@@ -129,7 +129,7 @@ class Go2Rewards:
 
     def energy_consumption_reward(self):
         """Reward for decreasing motor power"""
-        return -self._env.motor_power
+        return -self._robot.motor_power
 
     def contact_consistency_reward(self):
         desired_contact = self._gait_generator.desired_contact_state

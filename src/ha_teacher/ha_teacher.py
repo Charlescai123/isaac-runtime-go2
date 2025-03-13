@@ -16,7 +16,7 @@ np.set_printoptions(suppress=True)
 
 
 class HATeacher:
-    """Monitors the safety-critical systems in all envs"""
+    """HA-Teacher monitors the safety-critical systems in all envs"""
 
     def __init__(self, num_envs, teacher_cfg: ml_collections.ConfigDict(), device):
         self._device = device
@@ -279,15 +279,6 @@ class HATeacher:
 
         return (to_torch(F_kp, device=device),
                 to_torch(F_kd, device=device))
-
-    def system_patch_2d(self, roll_1d, pitch_1d, yaw_1d):
-        kp, kd = [], []
-        for i in range(len(roll_1d)):
-            r, p, y = roll_1d[i], pitch_1d[i], yaw_1d[i]
-            _kp, _kd = self.system_patch(r, p, y)
-            kp.append(_kp)
-            kd.append(_kd)
-        return np.asarray(kp), np.asarray(kd)
 
     @property
     def device(self):

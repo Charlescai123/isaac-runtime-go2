@@ -462,7 +462,7 @@ class Go2WildExploreEnv:
                      motor_velocities=torch.clone(self._robot.motor_velocities),
                      motor_action=motor_action,
                      motor_torques=self._robot.motor_torques,
-                     motor_power=self.motor_power,
+                     motor_power=self._robot.motor_power,
                      num_clips=self._num_clips,
                      foot_contact_state=self._gait_generator.desired_contact_state,
                      foot_contact_force=self._robot.foot_contact_forces,
@@ -745,17 +745,3 @@ class Go2WildExploreEnv:
     @episode_length_buf.setter
     def episode_length_buf(self, new_length: torch.Tensor):
         self._step_count = to_torch(new_length, device=self._device)
-
-    @property
-    def motor_power(self):
-        """Motor Power (Unit: Watt/N·m)
-        (Non-regenerative braking system)
-        Power is composed by two terms:
-        term1: mechanical power
-        term2: extra heat dissipation caused by copper loss
-        """
-        copper_loss_coeff = 1.3
-        mechanical_power = self._robot.motor_torques * self._robot.motor_velocities
-        copper_loss = copper_loss_coeff * self._robot.motor_torques ** 2
-        motor_power = torch.clip(mechanical_power + copper_loss, min=0)
-        return torch.clip(torch.sum(motor_power, dim=1), min=0., max=2000.)

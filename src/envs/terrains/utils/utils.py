@@ -4,7 +4,7 @@ import numpy as np
 from isaacgym import gymtorch, gymapi
 from isaacgym.terrain_utils import *
 
-from src.envs.terrains.sim_utils import add_ground, add_terrain
+from src.envs.terrains.utils.sim_utils import add_ground, add_terrain
 
 ASSET_ROOT = "resources/terrains"
 

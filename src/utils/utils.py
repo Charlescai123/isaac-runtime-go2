@@ -1,11 +1,11 @@
 import enum
 import time
 
-import torch
 import logging
 import numpy as np
 from typing import Any
 import isaacgym
+import torch
 from isaacgym import gymtorch, gymutil, gymapi
 from isaacgym.torch_utils import to_torch
 

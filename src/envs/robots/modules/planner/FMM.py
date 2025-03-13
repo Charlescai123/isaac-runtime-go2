@@ -178,7 +178,7 @@ class FMMPlanner:
 
         return goal
 
-    def is_near_goal(self, pos_in_map, arrival_radius=0.7):
+    def is_near_goal(self, pos_in_map, arrival_radius=0.5):
         """Determine whether the goal has been reached
         pos_in_map: The position on map
         arrival_radius: Arrival radius as a circle with unit meter (Threshold for checking goal reaching)

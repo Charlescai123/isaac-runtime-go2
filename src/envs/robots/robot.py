@@ -10,7 +10,7 @@ import ml_collections
 import torch
 
 from src.configs.defaults import asset_options as asset_options_config
-from src.envs.robots.modules.utils.rotation_utils import quat_to_rot_mat, get_euler_zyx_from_quaternion
+from src.envs.robots.utils.rotation_utils import quat_to_rot_mat, get_euler_zyx_from_quaternion
 from src.envs.robots.modules.sensor.rgbd_camera import RGBDCamera
 from isaacgym.terrain_utils import *
 
@@ -65,7 +65,7 @@ class Robot:
         self._robot_actors_global_indices = []
         self._robot_rigid_body_global_indices = []
 
-        self.record_video = False  # Record a video or not
+        self.record_video = True  # Record a video or not
 
         if "cuda" in self._device:
             torch._C._jit_set_profiling_mode(False)
@@ -74,7 +74,8 @@ class Robot:
         self._load_urdf(urdf_path)
         self._gym.prepare_sim(self._sim)
 
-        self._frames = []
+        self._rgb_frames = []
+        self._dep_frames = []
 
         self._init_buffers()
 
@@ -508,6 +509,20 @@ class Robot:
         return torch.clone(self._torques)
 
     @property
+    def motor_power(self):
+        """Motor Power (Unit: Watt/N·m)
+        (Non-regenerative braking system)
+        Power is composed by two terms:
+        term1: mechanical power
+        term2: extra heat dissipation caused by copper loss
+        """
+        copper_loss_coeff = 1.3
+        mechanical_power = self.motor_torques * self.motor_velocities
+        copper_loss = copper_loss_coeff * self.motor_torques ** 2
+        motor_power = torch.clip(mechanical_power + copper_loss, min=0)
+        return torch.clip(torch.sum(motor_power, dim=1), min=0., max=2000.)
+
+    @property
     def foot_positions_in_base_frame(self):
         foot_positions_world_frame = self._foot_positions
         base_position_world_frame = self._root_states[:self._num_envs, :3]
@@ -712,6 +727,6 @@ class Robot:
 
             # Record a video or not
             if self.record_video:
-                _depth_img = self._camera_sensors[0].get_current_frame()
-                self._frames.append(_depth_img)
-                pass
+                rgb_img, depth_img = self._camera_sensors[0].get_current_frame()
+                self._rgb_frames.append(rgb_img)        # RGB Frame
+                self._dep_frames.append(depth_img)      # Depth Frame

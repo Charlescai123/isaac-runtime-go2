@@ -131,7 +131,7 @@ def main(argv):
                         sim_config=sim_conf,
                         motor_control_mode=MotorControlMode.HYBRID)
 
-    from src.envs.terrains.sim_utils import add_terrain
+    from src.envs.terrains.utils.sim_utils import add_terrain
     gym = gymapi.acquire_gym()
 
     # Slope and stairs
@@ -151,23 +151,11 @@ def main(argv):
     robot._gym.draw_viewer(viewer, robot._sim, True)
 
     # add_uneven_terrains(gym=robot._gym, sim=sim)
-    # Add perception (BEV)
-    camera_props = gymapi.CameraProperties()
-    # camera_props.width = 512
-    # camera_props.height = 512
-
-    camera_props.enable_tensors = True
-
-    print(f"robot._envs: {robot._envs}")
 
     gym = robot._gym
 
-    # 将摄像机附加到环境中
     camera_properties = gymapi.CameraProperties()
     camera_handle = gym.create_camera_sensor(robot._envs[0], camera_properties)
-    # gym.set_camera_location(camera_handle, robot._envs[0], camera_transform)
-
-    # time.sleep(123)
 
     # camera_handle = robot._gym.create_camera_sensor(robot._envs[0], camera_props)
     mean_pos = torch.min(robot.base_position_world, dim=0)[0].cpu().numpy() + np.array([-2.5, -2.5, 2.5])

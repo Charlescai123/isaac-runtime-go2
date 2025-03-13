@@ -15,7 +15,7 @@ from tqdm import tqdm
 from src.configs.defaults import sim_config
 from src.envs.robots import go2_robot, go2
 from src.envs.robots.motors import MotorCommand, MotorControlMode
-from src.envs.terrains.wild_terrain_env import WildTerrainEnv
+from src.envs.terrains import WildTerrainEnv
 
 flags.DEFINE_bool("show_gui", True, "whether to show GUI.")
 flags.DEFINE_bool("use_gpu", True, "whether to use GPU.")

@@ -1,4 +1,4 @@
-name: runtime
+name: isaac-wild
 channels:
   - pytorch
   - conda-forge

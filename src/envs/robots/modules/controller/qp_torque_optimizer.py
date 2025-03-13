@@ -7,7 +7,7 @@ import torch
 from qpth.qp import QPFunction, QPSolvers
 
 from src.envs.robots.motors import MotorCommand
-from src.envs.robots.modules.utils.rotation_utils import quat_to_rot_mat
+from src.envs.robots.utils.rotation_utils import quat_to_rot_mat
 
 
 @torch.jit.script
@@ -509,8 +509,7 @@ class QPTorqueOptimizer:
 
     @desired_angular_velocity.setter
     def desired_angular_velocity(self, desired_angular_velocity: torch.Tensor):
-        self._desired_angular_velocity = to_torch(desired_angular_velocity,
-                                                  device=self._device)
+        self._desired_angular_velocity = to_torch(desired_angular_velocity, device=self._device)
 
     @property
     def desired_linear_acceleration(self):
