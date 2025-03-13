@@ -13,8 +13,8 @@ corl_ckpts/
 *.pkl
 
 # C extensions
-*.so
 
+*.bak
 # Distribution / packaging
 .Python
 data/
